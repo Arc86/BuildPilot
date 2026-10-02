@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Build Agent fixture</title></head>
+<body>
+<!-- Unit test: runs content.js against build-agent-dom.js with a stubbed chrome API. Result in window.__done. -->
+<script>
+  window.__msgs = [];
+  window.chrome = {
+    runtime: {
+      sendMessage: (m) => { window.__msgs.push(m); return Promise.resolve(); },
+      onMessage: { addListener: (fn) => { window.__listener = fn; } },
+    },
+  };
+</script>
+<script src="build-agent-dom.js"></script>
+<script>
+  addFailure('old-failure');
+  addTool('Old tool', 'stale', { disabled: true });
+  addTool('Write file', 'src/app.ts');
+</script>
+<script src="../content.js"></script>
+<script>
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const cmd = (msg) => new Promise((r) => window.__listener(msg, {}, r));
+  const statuses = () => __msgs.filter((m) => m.type === 'status').map((m) => m.status);
+  const last = () => statuses().at(-1);
+  const checks = [];
+  const check = (name, ok, got) => checks.push({ name, ok: !!ok, got });
+
+  (async () => {
+    await cmd({ cmd: 'start', cfg: { allowedTools: ['Write file'] } });
+    await wait(4500);
+    check('clicks allowed checkpoint', __clicks[0] === 'Write file', __clicks);
+    check('ignores disabled stale button', !__clicks.includes('Old tool'), __clicks);
+    check('ignores failure present before start', !statuses().some((s) => s.reason === 'error'), last());
+    check('confirms state change after click', __msgs.some((m) => m.entry?.action === 'confirmed'), null);
+    check('pauses on unknown checkpoint', last().reason === 'unknown' && last().pending?.label === 'Run command', last());
+    check('unknown checkpoint not clicked', !__clicks.includes('Run command'), __clicks);
+    check('notifies on pause', __msgs.some((m) => m.type === 'notify'), null);
+
+    await cmd({ cmd: 'start', cfg: { allowedTools: ['Write file', 'Run command'] } });
+    await wait(2000);
+    check('resume approves newly trusted checkpoint', __clicks.includes('Run command'), __clicks);
+    check('total counts both approvals', last().total === 2, last());
+
+    addFailure('new-failure');
+    await wait(2000);
+    check('pauses on new sub-agent failure', last().reason === 'error' && /new-failure/.test(last().message), last());
+
+    addPlan('MRP data model');
+    await cmd({ cmd: 'start', cfg: {} });
+    await wait(2000);
+    check('pauses on first plan as "Plan"', last().reason === 'unknown' && last().pending?.label === 'Plan' && /MRP data model/.test(last().pending.detail), last());
+    await cmd({ cmd: 'start', cfg: { allowedTools: ['Write file', 'Run command', 'Plan'] } });
+    await wait(2000);
+    check('approves trusted plan', __clicks.includes('plan:MRP data model'), __clicks);
+    addPlan('Conflict engine');
+    await wait(3000);
+    check('approves a different plan without asking', __clicks.includes('plan:Conflict engine'), __clicks);
+
+    await cmd({ cmd: 'start', cfg: { maxApprovals: 1 } });
+    addTool('Write file', 'a.ts');
+    await wait(2000);
+    addTool('Write file', 'b.ts');
+    await wait(3000);
+    check('pauses at approval limit', last().reason === 'limit', last());
+
+    await cmd({ cmd: 'stop' });
+    check('stops', last().state === 'stopped', last());
+
+    // Extension reloaded: sendMessage now throws. The old copy must shut down quietly.
+    await cmd({ cmd: 'start', cfg: { maxApprovals: 25 } });
+    const sent = __msgs.length;
+    chrome.runtime.sendMessage = () => { throw new Error('Extension context invalidated.'); };
+    let crashed = null;
+    window.addEventListener('error', (e) => (crashed = e.message));
+    addTool('Brand new tool', 'x');
+    await wait(3000);
+    check('orphaned copy does not crash', !crashed, crashed);
+    check('orphaned copy reports dead', !window.__buildPilot.isAlive(), null);
+    check('orphaned copy stops clicking', !__clicks.includes('Brand new tool') && __msgs.length === sent, __clicks);
+
+    window.__result = checks;
+    window.__done = checks.map((c) => `${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.ok ? '' : ' -> ' + JSON.stringify(c.got)}`).join('\n');
+  })();
+</script>
+</body>
+</html>
