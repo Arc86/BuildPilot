@@ -64,6 +64,11 @@
         <label><input type="radio" name="mode" value="replace"> Replace my learnings with this file</label>
       </fieldset>
 
+      <label id="impact-confirm" class="check impact" hidden>
+        <input id="impact-check" type="checkbox">
+        <span>I've checked the highlighted items. They let autopilot approve every plan or script run without asking.</span>
+      </label>
+
       <div class="actions">
         <button id="apply-btn" class="btn primary">Import</button>
         <button id="cancel-btn" class="btn">Cancel</button>
@@ -73,11 +78,19 @@
     <p id="done" class="done" role="status" hidden></p>
   </section>
 
+  <section class="block">
+    <h2>Instances</h2>
+    <p class="body">Autopilot can only run on these instances. Disabling one stops any run there and removes the extension's access to it.</p>
+    <ul id="instances" class="rules"></ul>
+    <p id="instances-empty" class="hint">No instances enabled. Enable one from the popup while Build Agent is open.</p>
+  </section>
+
   <footer class="foot">
     <span>Build Agent Autopilot v<span id="version"></span></span>
     <a href="https://github.com/Arc86/BuildPilot" target="_blank" rel="noopener">GitHub</a>
   </footer>
 
+  <script src="shared.js"></script>
   <script src="learnings.js"></script>
   <script src="options.js"></script>
 </body>

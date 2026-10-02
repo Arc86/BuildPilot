@@ -2,31 +2,51 @@
 <html>
 <head><meta charset="utf-8"><title>Learnings tests</title></head>
 <body>
-<!-- Unit tests for learnings.js (export/import validation). Result in window.__done. -->
+<!-- Unit tests for shared.js and learnings.js (safety rules, export/import validation). Result in window.__done. -->
+<script src="../shared.js"></script>
 <script src="../learnings.js"></script>
 <script>
+  const S = BuildPilotShared;
   const checks = [];
   const check = (name, ok, got) => checks.push({ name, ok: !!ok, got });
   const throws = (fn) => { try { fn(); return null; } catch (e) { return e.message; } };
-  const file = (o) => JSON.stringify({ format: 'buildpilot-learnings', version: 1, ...o });
+  const file = (o, version = 2) => JSON.stringify({ format: 'buildpilot-learnings', version, ...o });
 
+  // Shared safety rules
+  const unsafe = ['Reject', 'Delete all', 'Deleting', 'Removal', 'Cancel', 'Purge cache', 'Wipe', 'Truncate', 'Reset all', 'Overwrite', 'Clear data', 'Denied', 'Stop build'];
+  check('unsafe words cover stems and synonyms', unsafe.every((t) => S.UNSAFE_WORDS.test(t)), unsafe.filter((t) => !S.UNSAFE_WORDS.test(t)));
+  const safe = ['Approve', 'Approve plan', 'Confirm changes', 'Ship it', 'Proceed', 'Continue', 'Run Script'];
+  check('approval words are not unsafe', safe.every((t) => !S.UNSAFE_WORDS.test(t)), safe.filter((t) => S.UNSAFE_WORDS.test(t)));
+  const risky = ['gr.deleteMultiple()', 'DROP TABLE u_orders', 'truncate the log', 'purge old records', 'current.setWorkflow(false)', 'gs.eval(x)', 'insert into sys_user_has_role', 'wipes the table'];
+  check('risky content is detected', risky.every((t) => S.RISKY_CONTENT.test(t)), risky.filter((t) => !S.RISKY_CONTENT.test(t)));
+  const plain = ['Create table u_orders', 'Add a business rule to set the state', 'Write file src/app.ts', 'Update the form layout'];
+  check('ordinary steps are not risky', plain.every((t) => !S.RISKY_CONTENT.test(t)), plain.filter((t) => S.RISKY_CONTENT.test(t)));
+  check('approval limit is clamped to 1–500', S.clampApprovals(0) === 1 && S.clampApprovals(99999) === 500 && S.clampApprovals('abc') === 25 && S.clampApprovals('30') === 30, null);
+  check('trust keys parse', S.parseTrustKey('tool:Run Script')?.label === 'Run Script' && S.parseTrustKey('plan:Plan')?.kind === 'plan' && S.parseTrustKey('Run Script') === null && S.parseTrustKey('evil:x') === null, null);
+  const migrated = S.migrateTrust(['Plan', 'Run Script', 'Confirm changes (confirm-step)', 'Ship it (ship-card)', 'tool:Write file'], [{ host: 'confirm-step', text: 'Confirm changes' }]);
+  check('migrates v0.4 labels to trust keys', JSON.stringify(migrated) === JSON.stringify(['plan:Plan', 'tool:Run Script', 'button:Confirm changes (confirm-step)', 'button:Ship it (ship-card)', 'tool:Write file']), migrated);
+
+  // Export / import
   const mine = {
-    allowedTools: ['Plan', 'Run Script', 'Confirm changes (confirm-step)'],
+    allowedTools: ['plan:Plan', 'tool:Run Script', 'button:Confirm changes (confirm-step)'],
     customRules: [{ host: 'confirm-step', selector: 'button.btn.primary', text: 'Confirm changes', label: 'Confirm changes (confirm-step)' }],
     ignored: ['Continue anyway (retry-card)'],
   };
-
-  const round = Learnings.parse(JSON.stringify(Learnings.toFile(mine, '0.4.0')));
+  const round = Learnings.parse(JSON.stringify(Learnings.toFile(mine, '0.5.0')));
   check('round-trips an export', JSON.stringify([round.allowedTools, round.customRules, round.ignored]) === JSON.stringify([mine.allowedTools, mine.customRules, mine.ignored]) && round.skipped.length === 0, round);
 
   check('rejects non-JSON', /valid JSON/.test(throws(() => Learnings.parse('{nope'))), null);
   check('rejects other JSON files', /learnings file/.test(throws(() => Learnings.parse('{"a":1}'))), null);
-  check('rejects unknown versions', /version 2/.test(throws(() => Learnings.parse(JSON.stringify({ format: 'buildpilot-learnings', version: 2 })))), null);
+  check('rejects unknown versions', /version 3/.test(throws(() => Learnings.parse(file({}, 3)))), null);
+
+  const v1 = Learnings.parse(file({ allowedTools: ['Plan', 'Run Script', 'Ship it (ship-card)'], customRules: [{ host: 'ship-card', selector: 'button.ship', text: 'Ship it' }], ignored: [] }, 1));
+  check('imports v0.4 files by migrating them', JSON.stringify(v1.allowedTools) === JSON.stringify(['plan:Plan', 'tool:Run Script', 'button:Ship it (ship-card)']), v1.allowedTools);
 
   const bad = Learnings.parse(file({
-    allowedTools: ['Plan', 42, '', 'x'.repeat(121)],
+    allowedTools: ['plan:Plan', 42, '', 'x'.repeat(121), 'Run Script', 'evil:thing', 'tool:'],
     customRules: [
       { host: 'danger-card', selector: 'button.x', text: 'Delete all' },
+      { host: 'danger-card', selector: 'button.x', text: 'Purging' },
       { host: 'any-card', selector: 'button:not(.reject)', text: 'Go' },
       { host: 'any-card', selector: '*', text: 'Go' },
       { host: 'div', selector: 'button', text: 'Go' },
@@ -36,28 +56,30 @@
     ],
     ignored: { not: 'an array' },
   }));
-  check('keeps valid labels', bad.allowedTools.includes('Plan'), bad.allowedTools);
+  check('keeps valid trust keys', bad.allowedTools.includes('plan:Plan'), bad.allowedTools);
   check('skips non-text and oversized labels', bad.skipped.filter((s) => /label/.test(s.reason)).length === 3, bad.skipped);
-  check('skips destructive buttons', bad.skipped.some((s) => /destructive/.test(s.reason)), bad.skipped);
+  check('skips bare labels and unknown kinds in v2 files', bad.skipped.filter((s) => /recognised checkpoint/.test(s.reason)).length === 3, bad.skipped);
+  check('skips destructive buttons, including word stems', bad.skipped.filter((s) => /destructive/.test(s.reason)).length === 2, bad.skipped);
   check('skips complex or wildcard selectors', bad.skipped.filter((s) => /selector/.test(s.reason)).length === 2, bad.skipped);
   check('skips non-component hosts', bad.skipped.some((s) => /component name/.test(s.reason)), bad.skipped);
   check('skips long button text', bad.skipped.some((s) => /40 characters/.test(s.reason)), bad.skipped);
   check('keeps the one good rule', bad.customRules.length === 1 && bad.customRules[0].text === 'Ship it', bad.customRules);
   check('rebuilds the rule label', bad.customRules[0].label === 'Ship it (ship-card)', bad.customRules[0]);
-  check('trusts learned rules', bad.allowedTools.includes('Ship it (ship-card)'), bad.allowedTools);
+  check('trusts learned rules as buttons', bad.allowedTools.includes('button:Ship it (ship-card)'), bad.allowedTools);
   check('tolerates non-array fields', Array.isArray(bad.ignored) && bad.ignored.length === 0, bad.ignored);
 
   const theirs = Learnings.parse(file({
-    allowedTools: ['Plan', 'Write file'],
+    allowedTools: ['plan:Plan', 'tool:Write file'],
     customRules: [{ host: 'confirm-step', selector: 'button.btn.primary', text: 'Confirm changes' }, { host: 'ship-card', selector: 'button.ship', text: 'Ship it' }],
     ignored: ['Continue anyway (retry-card)', 'Proceed (old-step)'],
   }));
   const d = Learnings.diff(mine, theirs);
-  check('diff lists only new items', JSON.stringify(d.allowedTools) === JSON.stringify(['Write file', 'Ship it (ship-card)']) && d.customRules.length === 1 && JSON.stringify(d.ignored) === JSON.stringify(['Proceed (old-step)']), d);
+  check('diff lists only new items', JSON.stringify(d.allowedTools) === JSON.stringify(['tool:Write file', 'button:Confirm changes (confirm-step)', 'button:Ship it (ship-card)'].filter((k) => !mine.allowedTools.includes(k))) && d.customRules.length === 1 && JSON.stringify(d.ignored) === JSON.stringify(['Proceed (old-step)']), d);
   const added = Learnings.merge(mine, theirs, 'add');
-  check('add keeps existing and adds new', added.allowedTools.length === 5 && added.customRules.length === 2 && added.ignored.length === 2 && added.allowedTools.includes('Run Script'), added);
+  check('add keeps existing and adds new', added.allowedTools.includes('tool:Run Script') && added.allowedTools.includes('tool:Write file') && added.customRules.length === 2 && added.ignored.length === 2, added);
   const replaced = Learnings.merge(mine, theirs, 'replace');
-  check('replace makes the file the whole list', !replaced.allowedTools.includes('Run Script') && replaced.customRules.length === 2, replaced);
+  check('replace makes the file the whole list', !replaced.allowedTools.includes('tool:Run Script') && replaced.customRules.length === 2, replaced);
+  check('flags trust that approves broad work', Learnings.isHighImpact('plan:Plan') && Learnings.isHighImpact('tool:Run Script') && !Learnings.isHighImpact('tool:Write file') && !Learnings.isHighImpact('button:Ship it (ship-card)'), null);
 
   window.__done = checks.map((c) => `${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.ok ? '' : ' -> ' + JSON.stringify(c.got)}`).join('\n');
 </script>

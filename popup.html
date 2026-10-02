@@ -9,7 +9,7 @@
     <img src="icons/icon128.png" alt="" class="logo" width="28" height="28">
     <div class="top-text">
       <h1>Build Agent Autopilot</h1>
-      <p class="instance-line"><span class="instance-dot" aria-hidden="true"></span><span class="instance"></span></p>
+      <p class="instance-line"><span class="instance-dot" aria-hidden="true"></span><span class="instance"></span><button id="disable-btn" class="link quiet" hidden>Disable</button></p>
     </div>
   </header>
 
@@ -19,9 +19,17 @@
   </section>
 
   <section id="enable" class="empty" hidden>
-    <p class="empty-title">Enable autopilot on <span class="instance"></span>?</p>
-    <p class="empty-body">It only runs on instances you enable, and only after you click Start.</p>
+    <div id="risk" class="risk" hidden>
+      <p class="empty-title">For dev and demo instances only</p>
+      <p class="empty-body">Autopilot approves Build Agent's plans, scripts and changes without showing them to you, including changes that could delete data. Don't use it on customer, production or shared instances, or anywhere with sensitive data.</p>
+      <label class="check"><input id="risk-check" type="checkbox"> <span>I understand the risks and accept responsibility for where I use it.</span></label>
+    </div>
+    <div id="enable-plain" hidden>
+      <p class="empty-title">Enable autopilot on <span class="instance"></span>?</p>
+      <p class="empty-body">Only for personal dev or demo instances. Chrome will ask to give autopilot access to this instance.</p>
+    </div>
     <button id="enable-btn" class="btn primary block">Enable on this instance</button>
+    <a class="risk-link" href="https://github.com/Arc86/BuildPilot#risks" target="_blank" rel="noopener">Risks and details ↗</a>
   </section>
 
   <main id="main" hidden>
@@ -43,8 +51,10 @@
       <p class="pending-kicker">Needs you</p>
       <p id="pending-label" class="pending-label"></p>
       <p id="pending-detail" class="pending-detail"></p>
+      <p id="pending-risk" class="pending-risk" hidden></p>
       <div class="actions">
         <button id="trust-btn" class="btn primary">Always approve</button>
+        <button id="once-btn" class="btn">Approve once</button>
         <button id="ignore-btn" class="btn" hidden>Not a checkpoint</button>
       </div>
     </section>
@@ -71,7 +81,8 @@
     <section class="group">
       <div class="group-head">
         <h2>Recent</h2>
-        <button id="copy-btn" class="link">Copy log</button>
+        <button id="copy-btn" class="link" title="Copies actions and checkpoint names, without instance names or card text">Copy log</button>
+        <button id="clear-btn" class="link">Clear</button>
       </div>
       <ul id="history" class="timeline"></ul>
       <p id="history-empty" class="hint">Nothing yet on this instance.</p>
@@ -83,6 +94,7 @@
     <a href="https://github.com/Arc86/BuildPilot" target="_blank" rel="noopener">v<span id="version"></span> · GitHub</a>
   </footer>
 
+  <script src="shared.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

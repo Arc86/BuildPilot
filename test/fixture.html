@@ -2,13 +2,19 @@
 <html>
 <head><meta charset="utf-8"><title>Build Agent fixture</title></head>
 <body>
-<!-- Unit test: runs content.js against build-agent-dom.js with a stubbed chrome API. Result in window.__done. -->
+<!--
+  Unit test: runs content.js against build-agent-dom.js with a stubbed chrome API. Result in window.__done.
+  Teach mode only accepts real clicks, so the page queues CSS selectors in window.__realClicks and
+  test/run-fixture.js clicks them with Playwright inside the nested frames.
+-->
 <script>
   window.__msgs = [];
+  window.__realClicks = [];
   window.chrome = {
     runtime: {
+      id: 'test',
       sendMessage: (m) => { window.__msgs.push(m); return Promise.resolve(); },
-      onMessage: { addListener: (fn) => { window.__listener = fn; } },
+      onMessage: { addListener: (fn) => { window.__listener = fn; }, removeListener() {} },
     },
   };
 </script>
@@ -18,6 +24,7 @@
   addTool('Old tool', 'stale', { disabled: true });
   addTool('Write file', 'src/app.ts');
 </script>
+<script src="../shared.js"></script>
 <script src="../content.js"></script>
 <script>
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,118 +35,175 @@
   const check = (name, ok, got) => checks.push({ name, ok: !!ok, got });
   const until = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end && !fn()) await wait(200); return fn(); };
   const msgsOf = (type) => __msgs.filter((m) => m.type === type);
+  const count = (name) => __clicks.filter((c) => c === name).length;
+  const realClick = async (selector) => { __realClicks.push(selector); await until(() => !__realClicks.includes(selector), 15000); await wait(300); };
+  const T = (label) => `tool:${label}`;
+  const TOOLS = [T('Write file'), T('Run command')];
 
   (async () => {
-    await cmd({ cmd: 'start', cfg: { allowedTools: ['Write file'] } });
-    await wait(4500);
-    check('clicks allowed checkpoint', __clicks[0] === 'Write file', __clicks);
+    // Basics: trusted tool approved, unknown tool pauses.
+    await cmd({ cmd: 'start', cfg: { allowedTools: [T('Write file')] } });
+    await until(() => last().reason === 'unknown');
+    check('clicks trusted checkpoint', __clicks[0] === 'Write file', __clicks);
     check('ignores disabled stale button', !__clicks.includes('Old tool'), __clicks);
     check('ignores failure present before start', !statuses().some((s) => s.reason === 'error'), last());
     check('confirms state change after click', __msgs.some((m) => m.entry?.action === 'confirmed'), null);
-    check('pauses on unknown checkpoint', last().reason === 'unknown' && last().pending?.label === 'Run command', last());
+    check('pauses on unknown checkpoint', last().pending?.key === T('Run command'), last());
     check('unknown checkpoint not clicked', !__clicks.includes('Run command'), __clicks);
-    check('notifies on pause', __msgs.some((m) => m.type === 'notify'), null);
+    check('notifications stay generic', msgsOf('notify').length > 0 && msgsOf('notify').every((m) => !/Run command|Write file/.test(m.message)), msgsOf('notify'));
 
-    await cmd({ cmd: 'start', cfg: { allowedTools: ['Write file', 'Run command'] } });
-    await wait(2000);
+    await cmd({ cmd: 'start', cfg: { allowedTools: TOOLS } });
+    await until(() => __clicks.includes('Run command'));
     check('resume approves newly trusted checkpoint', __clicks.includes('Run command'), __clicks);
     check('total counts both approvals', last().total === 2, last());
 
     addFailure('new-failure');
-    await wait(2000);
+    await until(() => last().reason === 'error');
     check('pauses on new sub-agent failure', last().reason === 'error' && /new-failure/.test(last().message), last());
 
+    // Plans, and trust that is scoped by kind.
     addPlan('MRP data model');
     await cmd({ cmd: 'start', cfg: {} });
-    await wait(2000);
-    check('pauses on first plan as "Plan"', last().reason === 'unknown' && last().pending?.label === 'Plan' && /MRP data model/.test(last().pending.detail), last());
-    await cmd({ cmd: 'start', cfg: { allowedTools: ['Write file', 'Run command', 'Plan'] } });
-    await wait(2000);
+    await until(() => last().pending?.key === 'plan:Plan');
+    check('pauses on first plan', last().pending?.label === 'Plan' && /MRP data model/.test(last().pending.detail), last());
+    await cmd({ cmd: 'start', cfg: { allowedTools: [...TOOLS, 'plan:Plan'] } });
+    await until(() => __clicks.includes('plan:MRP data model'));
     check('approves trusted plan', __clicks.includes('plan:MRP data model'), __clicks);
+    addTool('Plan', 'a tool card that calls itself Plan');
+    await until(() => last().pending?.key === T('Plan'));
+    check('a tool titled "Plan" does not get plan trust', last().reason === 'unknown' && !__clicks.includes('Plan'), last());
+    const once = await cmd({ cmd: 'approveOnce' });
+    await until(() => __clicks.includes('Plan'));
+    check('approve once clicks the paused checkpoint', once.ok && __clicks.includes('Plan'), __clicks);
+    check('approve once resumes watching', last().state === 'watching', last());
     addPlan('Conflict engine');
-    await wait(3000);
+    await until(() => __clicks.includes('plan:Conflict engine'));
     check('approves a different plan without asking', __clicks.includes('plan:Conflict engine'), __clicks);
+
+    // Risky content pauses even trusted checkpoints.
+    const writes = count('Write file');
+    addTool('Write file', 'var gr = new GlideRecord("u_orders"); gr.deleteMultiple();');
+    await until(() => last().reason === 'risky');
+    check('pauses a trusted step that deletes data', last().reason === 'risky' && /delete/i.test(last().pending?.risky) && count('Write file') === writes, last());
+    await cmd({ cmd: 'approveOnce' });
+    await until(() => count('Write file') === writes + 1);
+    check('approve once clears a risky pause', count('Write file') === writes + 1 && last().state === 'watching', last());
+    await wait(2500); // the Run command this spawns gets approved
+
+    // Loop guard: the same checkpoint over and over.
+    await cmd({ cmd: 'pause' });
+    await cmd({ cmd: 'start', cfg: {} }); // resuming resets the guard
+    const runs = count('Run command');
+    for (let i = 0; i < 7; i++) { addTool('Run command', `step ${i}`); await wait(300); }
+    await until(() => last().reason === 'burst', 15000);
+    check('pauses when one checkpoint repeats 5 times a minute', last().reason === 'burst' && count('Run command') - runs === 5, { clicked: count('Run command') - runs, status: last() });
+    await cmd({ cmd: 'start', cfg: {} });
+    await until(() => count('Run command') - runs === 7, 10000);
+    check('resume after a loop pause continues', count('Run command') - runs === 7, count('Run command') - runs);
 
     await cmd({ cmd: 'start', cfg: { maxApprovals: 1 } });
     addTool('Write file', 'a.ts');
-    await wait(2000);
-    addTool('Write file', 'b.ts');
-    await wait(3000);
+    await until(() => last().reason === 'limit');
     check('pauses at approval limit', last().reason === 'limit', last());
-
     await cmd({ cmd: 'stop' });
     check('stops', last().state === 'stopped', last());
+    await cmd({ cmd: 'start', cfg: { maxApprovals: 25 } });
+    await wait(3000); // approve what is left over
 
-    // 1. Wider detection: an unknown approval-like button in the chat pauses and asks.
-    const ALLOWED = ['Write file', 'Run command', 'Plan'];
+    // Buttons detected by wording always ask, even when their label is trusted.
     addCard('history-item', '<button class="go">Continue</button>', { outside: true });
     addCard('confirm-step', '<button class="btn">Cancel</button><button class="btn primary">Confirm changes</button>');
-    await cmd({ cmd: 'start', cfg: { maxApprovals: 25 } });
-    await until(() => last().reason === 'unknown' && /confirm-step/.test(last().pending?.label));
+    await until(() => last().pending?.key === 'button:Confirm changes (confirm-step)');
     const p = last().pending;
-    check('pauses on unknown approval-like chat button', p?.label === 'Confirm changes (confirm-step)', last());
+    check('pauses on unknown approval-like chat button', !!p?.rule, last());
     check('suggests a rule for it', p?.rule?.selector === 'button.btn.primary' && p.rule.text === 'Confirm changes' && p.rule.host === 'confirm-step', p);
     check('ignores approval words outside the chat', !statuses().some((s) => /history-item/.test(s.pending?.label || '')), null);
-    await cmd({ cmd: 'start', cfg: { rules: [p.rule], allowedTools: [...ALLOWED, p.rule.label] } });
-    await until(() => __clicks.includes('confirm-step:Confirm changes'));
-    check('approves it once trusted', __clicks.includes('confirm-step:Confirm changes'), __clicks);
+    await cmd({ cmd: 'start', cfg: { allowedTools: [...TOOLS, 'plan:Plan', p.key], rules: [] } });
+    await wait(2000);
+    check('a trusted label without a rule still asks', last().reason === 'unknown' && count('confirm-step:Confirm changes') === 0, last());
+    await cmd({ cmd: 'start', cfg: { rules: [p.rule] } });
+    await until(() => count('confirm-step:Confirm changes') === 1);
+    check('approves it once the rule is learned', count('confirm-step:Confirm changes') === 1, __clicks);
     check('never clicks Cancel', !__clicks.includes('confirm-step:Cancel'), __clicks);
     addCard('confirm-step', '<button class="btn">Cancel</button><button class="btn primary">Confirm changes</button>');
-    await until(() => __clicks.filter((c) => c === 'confirm-step:Confirm changes').length === 2);
-    check('approves the next one by rule', __clicks.filter((c) => c === 'confirm-step:Confirm changes').length === 2, __clicks);
+    await until(() => count('confirm-step:Confirm changes') === 2);
+    check('approves the next one by rule', count('confirm-step:Confirm changes') === 2, __clicks);
+    addCard('confirm-step', '<button class="lookalike">Confirm changes</button>');
+    await until(() => last().reason === 'unknown');
+    check('a look-alike with other classes still asks', last().reason === 'unknown' && count('confirm-step:Confirm changes') === 2, last());
+    await cmd({ cmd: 'approveOnce' });
+    await until(() => count('confirm-step:Confirm changes') === 3);
 
     addCard('retry-card', '<button class="r">Continue anyway</button>');
     await cmd({ cmd: 'start', cfg: { ignored: ['Continue anyway (retry-card)'] } });
     await wait(2000);
     check('skips ignored buttons', last().state === 'watching' && !__clicks.includes('retry-card:Continue anyway'), last());
 
-    // 2. Teach: the user's next click on a chat button becomes a rule.
-    const deploy = addCard('deploy-card', '<button class="deploy hover">Ship it</button>');
+    // Teach: only the user's real click counts.
+    const probe = addCard('probe-card', '<button class="probe">Ship it</button>');
+    addCard('deploy-card', '<button class="deploy hover">Ship it</button>');
     await cmd({ cmd: 'teach', cfg: {} });
     check('reports teaching', last().teaching === true, last());
-    deploy.querySelector('button').click();
+    probe.querySelector('button').click(); // synthetic, as a page script would do
+    await wait(300);
+    check('ignores clicks made by page scripts', msgsOf('learned').length === 0 && last().teaching === true, msgsOf('learned'));
+    await realClick('deploy-card button');
     const learned = msgsOf('learned').at(-1)?.rule;
-    check('learns the clicked chat button', learned?.host === 'deploy-card' && learned.selector === 'button.deploy' && learned.text === 'Ship it', learned);
+    check('learns the button the user clicks', learned?.host === 'deploy-card' && learned.selector === 'button.deploy' && learned.text === 'Ship it', learned);
     check('teach mode ends after one click', last().teaching === false, last());
+    addCard('other-card', '<button class="deploy">Ship it</button>');
     addCard('deploy-card', '<button class="deploy">Ship it</button>');
-    await until(() => __clicks.filter((c) => c === 'deploy-card:Ship it').length === 2);
-    check('approves the learned button next time', __clicks.filter((c) => c === 'deploy-card:Ship it').length === 2, __clicks);
+    await until(() => count('deploy-card:Ship it') === 2);
+    check('approves the learned button next time', count('deploy-card:Ship it') === 2, __clicks);
+    check('learned rules only match their own component', !__clicks.includes('other-card:Ship it'), __clicks);
 
     const learnedCount = msgsOf('learned').length;
-    const danger = addCard('danger-card', '<button class="x">Reject all</button>');
+    addCard('danger-card', '<button class="x">Reset all</button>');
     await cmd({ cmd: 'teach', cfg: {} });
-    danger.querySelector('button').click();
+    await realClick('danger-card button');
     check('refuses to learn destructive buttons', msgsOf('learned').length === learnedCount && __msgs.some((m) => m.entry?.action === 'teach-refused'), null);
-    const outside = addCard('side-card', '<button class="y">Ship it</button>', { outside: true });
+    addCard('side-card', '<button class="y">Ship it</button>', { outside: true });
     await cmd({ cmd: 'teach', cfg: {} });
-    outside.querySelector('button').click();
+    await realClick('side-card button');
     check('refuses to learn buttons outside the chat', msgsOf('learned').length === learnedCount, msgsOf('learned'));
     await cmd({ cmd: 'stop' }); // so autopilot doesn't approve the card before the test clicks it
     addTool('Write file', 'c.ts');
     await cmd({ cmd: 'teach', cfg: {} });
-    await wait(100);
-    const builtin = [...document.querySelector('iframe').contentDocument.querySelector('iframe').contentDocument
-      .querySelector('chat-view').shadowRoot.querySelectorAll('chat-message')].at(-1)
-      .shadowRoot.querySelector('tool-use').shadowRoot.querySelector('.approve-btn');
-    builtin?.click();
+    await realClick('tool-use button.approve-btn >> nth=-1');
     check('refuses to re-learn built-in buttons', msgsOf('learned').length === learnedCount, msgsOf('learned'));
-    await wait(1000); // let the Run command card that Write file spawns settle
+    await wait(1000);
 
-    // Extension reloaded: sendMessage now throws. The old copy must shut down quietly.
-    await cmd({ cmd: 'start', cfg: { maxApprovals: 25 } });
-    const sent = __msgs.length;
-    chrome.runtime.sendMessage = () => { throw new Error('Extension context invalidated.'); };
+    // Extension reloaded: sendMessage throws. The old copy shuts down quietly...
+    await cmd({ cmd: 'start', cfg: {} });
     let crashed = null;
     window.addEventListener('error', (e) => (crashed = e.message));
+    const send = chrome.runtime.sendMessage;
+    chrome.runtime.sendMessage = () => { throw new Error('Extension context invalidated.'); };
     addTool('Brand new tool', 'x');
     await wait(3000);
     check('orphaned copy does not crash', !crashed, crashed);
     check('orphaned copy reports dead', !window.__buildPilot.isAlive(), null);
-    check('orphaned copy stops clicking', !__clicks.includes('Brand new tool') && __msgs.length === sent, __clicks);
+    check('orphaned copy stops clicking', !__clicks.includes('Brand new tool'), __clicks);
+
+    // ...and a fresh injection replaces it.
+    chrome.runtime.sendMessage = send;
+    const script = document.createElement('script');
+    script.src = '../content.js';
+    await new Promise((r) => { script.onload = r; document.body.append(script); });
+    check('a new injection replaces the orphaned copy', window.__buildPilot.isAlive(), null);
+    await cmd({ cmd: 'start', cfg: { allowedTools: [...TOOLS, T('Brand new tool')] } });
+    await until(() => __clicks.includes('Brand new tool'));
+    await wait(2000);
+    // A copy whose extension is gone must not click, even a trusted checkpoint.
+    chrome.runtime.id = undefined;
+    const before = count('Write file');
+    addTool('Write file', 'd.ts');
+    await wait(3000);
+    check('orphaned copy never clicks with stale settings', count('Write file') === before, __clicks);
 
     window.__result = checks;
     window.__done = checks.map((c) => `${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.ok ? '' : ' -> ' + JSON.stringify(c.got)}`).join('\n');
-  })();
+  })().catch((e) => (window.__done = `FAIL scenario crashed: ${e.stack}`));
 </script>
 </body>
 </html>

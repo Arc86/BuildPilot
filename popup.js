@@ -1,15 +1,23 @@
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { instances: [], allowedTools: [], customRules: [], ignored: [], maxApprovals: 25, history: [] };
+const S = globalThis.BuildPilotShared;
+const DEFAULTS = { instances: [], allowedTools: [], customRules: [], ignored: [], maxApprovals: 25, history: [], riskAcceptedHosts: [] };
 const REPO = 'https://github.com/Arc86/BuildPilot';
+const STATE_LABEL = { watching: 'Watching', paused: 'Paused', reconnecting: 'Reconnecting', stopped: 'Not running', teaching: 'Teaching' };
 
 let tab;
 let host = '';
 
 const statusKey = () => `status:${tab.id}`;
+const origin = () => `https://${host}/*`;
 const time = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const settings = () => chrome.storage.local.get(DEFAULTS);
+const getStatus = async () => (await chrome.storage.session.get(statusKey()))[statusKey()];
 
-async function settings() {
-  return chrome.storage.local.get(DEFAULTS);
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
 }
 
 function showError(err) {
@@ -17,22 +25,13 @@ function showError(err) {
   $('error').hidden = !err;
 }
 
-async function sendToTab(msg) {
-  try {
-    return await chrome.tabs.sendMessage(tab.id, msg);
-  } catch {
-    return null; // content script not injected on this page
-  }
-}
-
-// Runs a background command for this tab and shows its error, if any.
+// Every settings change goes through the background, which serialises writes.
 async function command(cmd, extra = {}) {
   showError(null);
   const res = await chrome.runtime.sendMessage({ cmd, tabId: tab.id, ...extra });
   if (res?.error) showError(res.error);
+  return res;
 }
-
-const STATE_LABEL = { watching: 'Watching', paused: 'Paused', reconnecting: 'Reconnecting', stopped: 'Not running', teaching: 'Teaching' };
 
 function statusDetail({ state, message, teaching, pending }) {
   if (teaching) return 'Click the button in Build Agent you want autopilot to learn.';
@@ -42,7 +41,7 @@ function statusDetail({ state, message, teaching, pending }) {
   return message;
 }
 
-// Opens a pre-filled GitHub issue with only the button rule — never plan text or instance names.
+// Opens a pre-filled GitHub issue with only the button rule — never card text or instance names.
 function reportUrl(rule) {
   const url = new URL(`${REPO}/issues/new`);
   url.search = new URLSearchParams({
@@ -56,39 +55,44 @@ function reportUrl(rule) {
   return url.href;
 }
 
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
-}
-
 // actions: { text, title, className, onclick }
-function listItem(text, actions) {
+function chip(text, title, actions) {
   const li = el('li');
-  li.append(el('span', 'item-label', text));
-  for (const { text: label, title, className, onclick } of actions) {
-    const b = el('button', className, label);
-    b.title = title;
-    b.setAttribute('aria-label', title);
-    b.onclick = onclick;
+  const label = el('span', 'item-label', text);
+  label.title = title;
+  li.append(label);
+  for (const a of actions) {
+    const b = el('button', a.className, a.text);
+    b.title = a.title;
+    b.setAttribute('aria-label', a.title);
+    b.onclick = a.onclick;
     li.append(b);
   }
   return li;
 }
 
 async function render() {
-  const data = await chrome.storage.local.get({ ...DEFAULTS, [statusKey()]: null });
-  const status = data[statusKey()] || { state: 'stopped', total: 0 };
+  const data = await settings();
+  const status = (await getStatus()) || { state: 'stopped', total: 0 };
   const supported = host.endsWith('.service-now.com');
-  const enabled = data.instances.includes(host);
+  const permitted = supported && (await chrome.permissions.contains({ origins: [origin()] }));
+  const enabled = permitted && data.instances.includes(host);
 
   $('unsupported').hidden = supported;
   $('enable').hidden = !supported || enabled;
-  $('main').hidden = !supported || !enabled;
-  $('setting').hidden = $('main').hidden;
-  document.querySelectorAll('.instance').forEach((el) => (el.textContent = host.split('.')[0]));
-  if (!supported || !enabled) return;
+  $('main').hidden = !enabled;
+  $('setting').hidden = !enabled;
+  $('disable-btn').hidden = !enabled;
+  document.querySelectorAll('.instance').forEach((n) => (n.textContent = host.split('.')[0]));
+
+  if (supported && !enabled) {
+    // The full warning is shown once per instance; re-enabling an acknowledged instance skips it.
+    const accepted = data.riskAcceptedHosts.includes(host);
+    $('risk').hidden = accepted;
+    $('enable-plain').hidden = !accepted;
+    $('enable-btn').disabled = !accepted && !$('risk-check').checked;
+  }
+  if (!enabled) return;
 
   document.body.dataset.state = status.teaching ? 'teaching' : status.state;
   document.body.dataset.reason = status.state === 'paused' ? status.reason || '' : '';
@@ -101,7 +105,11 @@ async function render() {
   if (p) {
     $('pending-label').textContent = p.label;
     $('pending-detail').textContent = p.detail || '';
-    $('ignore-btn').hidden = !p.rule; // only detected-by-wording buttons can be ignored
+    $('pending-risk').hidden = !p.risky;
+    $('pending-risk').textContent = p.risky ? `Mentions "${p.risky}": this step may delete data or change access.` : '';
+    $('trust-btn').hidden = status.reason !== 'unknown'; // already trusted when paused for risk or a loop
+    $('once-btn').classList.toggle('primary', $('trust-btn').hidden);
+    $('ignore-btn').hidden = !p.rule; // only buttons detected by their wording can be ignored
   }
 
   // Show only the controls that apply right now.
@@ -113,12 +121,13 @@ async function render() {
   $('teach-btn').textContent = status.teaching ? 'Waiting for your click…' : 'Teach a button';
 
   $('tools').replaceChildren(
-    ...data.allowedTools.map((label) => {
-      const rule = data.customRules.find((r) => r.label === label);
+    ...data.allowedTools.map((key) => {
+      const parsed = S.parseTrustKey(key) || { kind: 'tool', label: key };
+      const rule = parsed.kind === 'button' && data.customRules.find((r) => r.label === parsed.label);
       const actions = [];
       if (rule) actions.push({ text: 'Report', title: 'Suggest this button for the built-in list on GitHub', className: 'link', onclick: () => chrome.tabs.create({ url: reportUrl(rule) }) });
-      actions.push({ text: '×', title: `Stop auto-approving ${label}`, className: 'icon-btn', onclick: () => untrust(label) });
-      return listItem(label, actions);
+      actions.push({ text: '×', title: `Stop auto-approving ${parsed.label}`, className: 'icon-btn', onclick: () => command('untrust', { key }) });
+      return chip(parsed.label, S.KINDS[parsed.kind], actions);
     }),
   );
   $('tools-empty').hidden = data.allowedTools.length > 0;
@@ -127,7 +136,7 @@ async function render() {
   $('ignored-section').hidden = data.ignored.length === 0;
   $('ignored').replaceChildren(
     ...data.ignored.map((label) =>
-      listItem(label, [{ text: '×', title: `Stop ignoring ${label}`, className: 'icon-btn', onclick: () => unignore(label) }]),
+      chip(label, 'Ignored button', [{ text: '×', title: `Stop ignoring ${label}`, className: 'icon-btn', onclick: () => command('unignore', { label }) }]),
     ),
   );
 
@@ -154,28 +163,16 @@ async function render() {
     }),
   );
   $('history-empty').hidden = recent.length > 0;
+  $('clear-btn').hidden = data.history.length === 0;
 }
 
-// The background pushes changed settings to running tabs, so these only update storage.
-async function untrust(label) {
-  const { allowedTools, customRules } = await settings();
-  await chrome.storage.local.set({ allowedTools: allowedTools.filter((t) => t !== label), customRules: customRules.filter((r) => r.label !== label) });
-}
-
-async function unignore(label) {
-  const { ignored } = await settings();
-  await chrome.storage.local.set({ ignored: ignored.filter((t) => t !== label) });
-}
-
-async function stop() {
-  if (await sendToTab({ cmd: 'stop' })) return;
-  // No content script (e.g. mid-reconnect): mark stopped so the background won't re-inject.
-  const status = (await chrome.storage.local.get(statusKey()))[statusKey()] || {};
-  await chrome.storage.local.set({ [statusKey()]: { ...status, state: 'stopped', reason: '', pending: null, message: 'Stopped' } });
-}
-
-async function pendingCheckpoint() {
-  return (await chrome.storage.local.get(statusKey()))[statusKey()]?.pending;
+async function enable() {
+  await command('prepareEnable', { host });
+  // The permission prompt can close the popup; the background finishes enabling if it does.
+  const granted = await chrome.permissions.request({ origins: [origin()] }).catch((err) => showError(err));
+  if (granted) await command('enable', { host });
+  else if (granted === false) showError('Autopilot needs access to this instance to run.');
+  render();
 }
 
 async function init() {
@@ -183,32 +180,33 @@ async function init() {
   try { host = new URL(tab.url).host; } catch {}
   $('version').textContent = chrome.runtime.getManifest().version;
 
-  $('enable-btn').onclick = async () => {
-    const { instances } = await settings();
-    await chrome.storage.local.set({ instances: [...new Set([...instances, host])] });
+  $('risk-check').onchange = render;
+  $('enable-btn').onclick = enable;
+  $('disable-btn').onclick = async () => {
+    if (confirm(`Disable autopilot on ${host.split('.')[0]}? It stops any run and removes access to this instance.`)) await command('disable', { host });
   };
   $('start-btn').onclick = () => command('startTab');
-  $('pause-btn').onclick = () => sendToTab({ cmd: 'pause' });
-  $('stop-btn').onclick = stop;
+  $('pause-btn').onclick = () => chrome.tabs.sendMessage(tab.id, { cmd: 'pause' }).catch(() => {});
+  $('stop-btn').onclick = () => command('stopTab');
   $('teach-btn').onclick = () => command('teachTab');
   $('manage-btn').onclick = () => chrome.runtime.openOptionsPage();
   $('trust-btn').onclick = async () => {
-    const p = await pendingCheckpoint();
-    if (p) await command('trust', { label: p.label, rule: p.rule });
+    const p = (await getStatus())?.pending;
+    if (p) await command('trust', { key: p.key, rule: p.rule });
   };
+  $('once-btn').onclick = () => command('approveOnce');
   $('ignore-btn').onclick = async () => {
-    const p = await pendingCheckpoint();
+    const p = (await getStatus())?.pending;
     if (p) await command('ignore', { label: p.label });
   };
-  $('max').onchange = async () => {
-    const maxApprovals = Math.max(1, Number($('max').value) || DEFAULTS.maxApprovals);
-    await chrome.storage.local.set({ maxApprovals });
-  };
+  $('max').onchange = () => command('setMax', { value: $('max').value });
   $('copy-btn').onclick = async () => {
     const { history } = await settings();
-    await navigator.clipboard.writeText(JSON.stringify(history.slice(-50), null, 2));
+    const safe = history.slice(-50).map(({ at, action, label }) => ({ at: new Date(at).toISOString(), action, label }));
+    await navigator.clipboard.writeText(JSON.stringify(safe, null, 2));
     $('copy-btn').textContent = 'Copied';
   };
+  $('clear-btn').onclick = () => command('clearLog');
 
   chrome.storage.onChanged.addListener(render);
   render();

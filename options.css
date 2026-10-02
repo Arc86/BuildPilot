@@ -60,6 +60,14 @@ body.page {
 .rules li:last-child { border-bottom: none; }
 .rules .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 #skipped .meta { color: var(--danger); }
+.chips li.high { padding-right: 10px; border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: var(--warn-soft); }
+.preview .chips li:not(.high) { padding-right: 10px; }
+.chips .impact-tag { margin-left: 6px; font-size: 11px; font-weight: 650; color: var(--warn); }
+.check { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.check input { margin: 3px 0 0; accent-color: var(--accent); flex-shrink: 0; }
+.impact { margin-top: 14px; font-size: 13px; }
+#instances li { display: flex; align-items: center; gap: 8px; }
+#instances .host { flex: 1; overflow-wrap: anywhere; }
 
 .mode { margin: 16px 0 0; padding: 0; border: none; display: grid; gap: 6px; }
 .mode legend { padding: 0; margin-bottom: 6px; font-size: 12px; font-weight: 650; color: var(--text-2); }
