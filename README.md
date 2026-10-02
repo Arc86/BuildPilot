@@ -1,6 +1,10 @@
-# Build Agent Autopilot
+<p align="center">
+  <img src="icons/logo.png" width="128" height="128" alt="Build Agent Autopilot icon">
+</p>
 
-Chrome extension (Manifest V3) that approves recognised ServiceNow Build Agent checkpoints so a POC build keeps running without you watching it.
+<h1 align="center">Build Agent Autopilot</h1>
+
+<p align="center">Chrome extension (Manifest V3) that approves recognised ServiceNow Build Agent checkpoints so a POC build keeps running without you watching it.</p>
 
 ## Install
 
