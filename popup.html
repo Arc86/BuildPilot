@@ -26,7 +26,10 @@
     <div id="pending" class="card" hidden>
       <p id="pending-label"></p>
       <p id="pending-detail" class="muted small"></p>
-      <button id="trust-btn" class="primary">Always approve this checkpoint</button>
+      <div class="row">
+        <button id="trust-btn" class="primary">Always approve</button>
+        <button id="ignore-btn" hidden>Not a checkpoint</button>
+      </div>
     </div>
 
     <div class="row">
@@ -36,9 +39,19 @@
     </div>
     <p id="error" class="error" hidden></p>
 
+    <div class="row">
+      <button id="teach-btn">Teach a button</button>
+      <span id="teach-hint" class="muted small">Autopilot missed an approval? Click Teach, then click that button in Build Agent.</span>
+    </div>
+
     <h2>Approved checkpoints</h2>
     <ul id="tools"></ul>
     <p id="tools-empty" class="muted small">None yet. Autopilot pauses on each new checkpoint so you can approve it once.</p>
+
+    <div id="ignored-section" hidden>
+      <h2>Ignored buttons</h2>
+      <ul id="ignored"></ul>
+    </div>
 
     <label class="row small">Pause after <input id="max" type="number" min="1" max="500"> approvals</label>
 

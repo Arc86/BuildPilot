@@ -1,7 +1,7 @@
 // Rebuilds the Build Agent DOM shape observed on a real instance:
 //   document > iframe > iframe > chat-view#shadow > chat-message#shadow > tool-use#shadow > button.approve-btn
 //                                                                      > planning-display#shadow > button.plan-btn.approve
-// Exposes addTool / addPlan / addFailure and records clicks in window.__clicks.
+// Exposes addTool / addPlan / addFailure / addCard and records clicks in window.__clicks.
 (() => {
     const outer = document.createElement('iframe');
     document.body.append(outer);
@@ -28,7 +28,7 @@
       const approve = r.querySelector('.approve-btn');
       approve.addEventListener('click', () => {
         window.__clicks.push(name);
-        setTimeout(() => r.querySelector('.actions').remove(), 300);
+        setTimeout(() => r.querySelector('.actions')?.remove(), 300);
         if (name === 'Write file') setTimeout(() => window.addTool('Run command', 'npm run build'), 600);
       });
     };
@@ -41,7 +41,7 @@
         <div class="actions"><button class="plan-btn">Revise</button><button class="plan-btn approve">Approve plan</button></div>`;
       r.querySelector('.approve').addEventListener('click', () => {
         window.__clicks.push(`plan:${title}`);
-        setTimeout(() => r.querySelector('.actions').remove(), 300);
+        setTimeout(() => r.querySelector('.actions')?.remove(), 300);
       });
     };
 
@@ -49,6 +49,21 @@
       const s = doc.createElement('sub-agent-display');
       message().append(s);
       s.attachShadow({ mode: 'open' }).innerHTML = `<div class="sub-agent-header">${name}\nFailed · 3 tools · 1m 2s</div>`;
+    };
+
+    // A card of an unknown kind. `outside` puts it in the page but outside chat-view.
+    window.addCard = (tag, buttons, { outside = false } = {}) => {
+      const el = doc.createElement(tag);
+      (outside ? doc.body : message()).append(el);
+      const r = el.attachShadow({ mode: 'open' });
+      r.innerHTML = `<p>${tag} card</p><div class="actions">${buttons}</div>`;
+      for (const b of r.querySelectorAll('button')) {
+        b.addEventListener('click', () => {
+          window.__clicks.push(`${tag}:${b.textContent.trim()}`);
+          setTimeout(() => r.querySelector('.actions')?.remove(), 300);
+        });
+      }
+      return r;
     };
 
   window.__clicks = [];

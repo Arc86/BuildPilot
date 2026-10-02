@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { instances: [], allowedTools: [], maxApprovals: 25, history: [] };
+const DEFAULTS = { instances: [], allowedTools: [], customRules: [], ignored: [], maxApprovals: 25, history: [] };
+const REPO = 'https://github.com/Arc86/BuildPilot';
 
 let tab;
 let host = '';
@@ -24,10 +25,47 @@ async function sendToTab(msg) {
   }
 }
 
-function statusText({ state, message }) {
+// Runs a background command for this tab and shows its error, if any.
+async function command(cmd, extra = {}) {
+  showError(null);
+  const res = await chrome.runtime.sendMessage({ cmd, tabId: tab.id, ...extra });
+  if (res?.error) showError(res.error);
+}
+
+function statusText({ state, message, teaching }) {
+  if (teaching) return 'Teaching — click the button in Build Agent';
   if (state === 'paused') return `Paused — ${message}`;
   if (state === 'watching') return message && !message.startsWith('Watching') ? `Watching · ${message}` : 'Watching for approval';
   return message && message !== 'Stopped' ? message : 'Not running';
+}
+
+// Opens a pre-filled GitHub issue with only the button rule — never plan text or instance names.
+function reportUrl(rule) {
+  const url = new URL(`${REPO}/issues/new`);
+  url.search = new URLSearchParams({
+    template: 'new-checkpoint.yml',
+    title: `New checkpoint: ${rule.text}`,
+    component: rule.host,
+    selector: rule.selector,
+    button_text: rule.text,
+    version: chrome.runtime.getManifest().version,
+  });
+  return url.href;
+}
+
+function listItem(text, actions) {
+  const li = document.createElement('li');
+  const span = document.createElement('span');
+  span.textContent = text;
+  li.append(span);
+  for (const { label, title, onclick } of actions) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title;
+    b.onclick = onclick;
+    li.append(b);
+  }
+  return li;
 }
 
 async function render() {
@@ -45,31 +83,37 @@ async function render() {
   $('status').textContent = statusText(status);
   $('total').textContent = status.total ?? 0;
 
-  $('pending').hidden = !status.pending;
-  if (status.pending) {
-    $('pending-label').textContent = `New checkpoint: ${status.pending.label}`;
-    $('pending-detail').textContent = status.pending.detail || '';
+  const p = status.pending;
+  $('pending').hidden = !p;
+  if (p) {
+    $('pending-label').textContent = `New checkpoint: ${p.label}`;
+    $('pending-detail').textContent = p.detail || '';
+    $('ignore-btn').hidden = !p.rule; // only detected-by-wording buttons can be ignored
   }
 
   $('start-btn').textContent = status.state === 'paused' ? 'Resume' : 'Start autopilot';
   $('start-btn').disabled = status.state === 'watching' || status.state === 'reconnecting';
   $('pause-btn').disabled = status.state !== 'watching';
   $('stop-btn').disabled = status.state === 'stopped';
+  $('teach-btn').disabled = !!status.teaching;
 
   $('tools').replaceChildren(
     ...data.allowedTools.map((label) => {
-      const li = document.createElement('li');
-      const span = document.createElement('span');
-      span.textContent = label;
-      const rm = document.createElement('button');
-      rm.textContent = '×';
-      rm.title = 'Stop auto-approving this checkpoint';
-      rm.onclick = () => setAllowed(data.allowedTools.filter((t) => t !== label));
-      li.append(span, rm);
-      return li;
+      const rule = data.customRules.find((r) => r.label === label);
+      const actions = [];
+      if (rule) actions.push({ label: 'Report', title: 'Suggest this button for the built-in list on GitHub', onclick: () => chrome.tabs.create({ url: reportUrl(rule) }) });
+      actions.push({ label: '×', title: 'Stop auto-approving this checkpoint', onclick: () => untrust(label) });
+      return listItem(label, actions);
     }),
   );
   $('tools-empty').hidden = data.allowedTools.length > 0;
+
+  $('ignored-section').hidden = data.ignored.length === 0;
+  $('ignored').replaceChildren(
+    ...data.ignored.map((label) =>
+      listItem(label, [{ label: '×', title: 'Stop ignoring this button', onclick: () => unignore(label) }]),
+    ),
+  );
 
   if (document.activeElement !== $('max')) $('max').value = data.maxApprovals;
 
@@ -86,15 +130,18 @@ async function render() {
   );
 }
 
-async function setAllowed(allowedTools) {
-  await chrome.storage.local.set({ allowedTools });
-  await sendToTab({ cmd: 'config', cfg: { allowedTools } });
+async function untrust(label) {
+  const { allowedTools, customRules } = await settings();
+  const next = { allowedTools: allowedTools.filter((t) => t !== label), customRules: customRules.filter((r) => r.label !== label) };
+  await chrome.storage.local.set(next);
+  await sendToTab({ cmd: 'config', cfg: { allowedTools: next.allowedTools, rules: next.customRules } });
 }
 
-async function start() {
-  showError(null);
-  const res = await chrome.runtime.sendMessage({ cmd: 'startTab', tabId: tab.id });
-  if (res?.error) showError(res.error);
+async function unignore(label) {
+  const { ignored } = await settings();
+  const next = ignored.filter((t) => t !== label);
+  await chrome.storage.local.set({ ignored: next });
+  await sendToTab({ cmd: 'config', cfg: { ignored: next } });
 }
 
 async function stop() {
@@ -102,6 +149,10 @@ async function stop() {
   // No content script (e.g. mid-reconnect): mark stopped so the background won't re-inject.
   const status = (await chrome.storage.local.get(statusKey()))[statusKey()] || {};
   await chrome.storage.local.set({ [statusKey()]: { ...status, state: 'stopped', reason: '', pending: null, message: 'Stopped' } });
+}
+
+async function pendingCheckpoint() {
+  return (await chrome.storage.local.get(statusKey()))[statusKey()]?.pending;
 }
 
 async function init() {
@@ -112,15 +163,17 @@ async function init() {
     const { instances } = await settings();
     await chrome.storage.local.set({ instances: [...new Set([...instances, host])] });
   };
-  $('start-btn').onclick = start;
+  $('start-btn').onclick = () => command('startTab');
   $('pause-btn').onclick = () => sendToTab({ cmd: 'pause' });
   $('stop-btn').onclick = stop;
+  $('teach-btn').onclick = () => command('teachTab');
   $('trust-btn').onclick = async () => {
-    const data = await chrome.storage.local.get({ ...DEFAULTS, [statusKey()]: null });
-    const label = data[statusKey()]?.pending?.label;
-    if (!label) return;
-    await chrome.storage.local.set({ allowedTools: [...new Set([...data.allowedTools, label])] });
-    await start();
+    const p = await pendingCheckpoint();
+    if (p) await command('trust', { label: p.label, rule: p.rule });
+  };
+  $('ignore-btn').onclick = async () => {
+    const p = await pendingCheckpoint();
+    if (p) await command('ignore', { label: p.label });
   };
   $('max').onchange = async () => {
     const maxApprovals = Math.max(1, Number($('max').value) || DEFAULTS.maxApprovals);

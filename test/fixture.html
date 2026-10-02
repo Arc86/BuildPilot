@@ -26,6 +26,8 @@
   const last = () => statuses().at(-1);
   const checks = [];
   const check = (name, ok, got) => checks.push({ name, ok: !!ok, got });
+  const until = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end && !fn()) await wait(200); return fn(); };
+  const msgsOf = (type) => __msgs.filter((m) => m.type === type);
 
   (async () => {
     await cmd({ cmd: 'start', cfg: { allowedTools: ['Write file'] } });
@@ -67,6 +69,61 @@
 
     await cmd({ cmd: 'stop' });
     check('stops', last().state === 'stopped', last());
+
+    // 1. Wider detection: an unknown approval-like button in the chat pauses and asks.
+    const ALLOWED = ['Write file', 'Run command', 'Plan'];
+    addCard('history-item', '<button class="go">Continue</button>', { outside: true });
+    addCard('confirm-step', '<button class="btn">Cancel</button><button class="btn primary">Confirm changes</button>');
+    await cmd({ cmd: 'start', cfg: { maxApprovals: 25 } });
+    await until(() => last().reason === 'unknown' && /confirm-step/.test(last().pending?.label));
+    const p = last().pending;
+    check('pauses on unknown approval-like chat button', p?.label === 'Confirm changes (confirm-step)', last());
+    check('suggests a rule for it', p?.rule?.selector === 'button.btn.primary' && p.rule.text === 'Confirm changes' && p.rule.host === 'confirm-step', p);
+    check('ignores approval words outside the chat', !statuses().some((s) => /history-item/.test(s.pending?.label || '')), null);
+    await cmd({ cmd: 'start', cfg: { rules: [p.rule], allowedTools: [...ALLOWED, p.rule.label] } });
+    await until(() => __clicks.includes('confirm-step:Confirm changes'));
+    check('approves it once trusted', __clicks.includes('confirm-step:Confirm changes'), __clicks);
+    check('never clicks Cancel', !__clicks.includes('confirm-step:Cancel'), __clicks);
+    addCard('confirm-step', '<button class="btn">Cancel</button><button class="btn primary">Confirm changes</button>');
+    await until(() => __clicks.filter((c) => c === 'confirm-step:Confirm changes').length === 2);
+    check('approves the next one by rule', __clicks.filter((c) => c === 'confirm-step:Confirm changes').length === 2, __clicks);
+
+    addCard('retry-card', '<button class="r">Continue anyway</button>');
+    await cmd({ cmd: 'start', cfg: { ignored: ['Continue anyway (retry-card)'] } });
+    await wait(2000);
+    check('skips ignored buttons', last().state === 'watching' && !__clicks.includes('retry-card:Continue anyway'), last());
+
+    // 2. Teach: the user's next click on a chat button becomes a rule.
+    const deploy = addCard('deploy-card', '<button class="deploy hover">Ship it</button>');
+    await cmd({ cmd: 'teach', cfg: {} });
+    check('reports teaching', last().teaching === true, last());
+    deploy.querySelector('button').click();
+    const learned = msgsOf('learned').at(-1)?.rule;
+    check('learns the clicked chat button', learned?.host === 'deploy-card' && learned.selector === 'button.deploy' && learned.text === 'Ship it', learned);
+    check('teach mode ends after one click', last().teaching === false, last());
+    addCard('deploy-card', '<button class="deploy">Ship it</button>');
+    await until(() => __clicks.filter((c) => c === 'deploy-card:Ship it').length === 2);
+    check('approves the learned button next time', __clicks.filter((c) => c === 'deploy-card:Ship it').length === 2, __clicks);
+
+    const learnedCount = msgsOf('learned').length;
+    const danger = addCard('danger-card', '<button class="x">Reject all</button>');
+    await cmd({ cmd: 'teach', cfg: {} });
+    danger.querySelector('button').click();
+    check('refuses to learn destructive buttons', msgsOf('learned').length === learnedCount && __msgs.some((m) => m.entry?.action === 'teach-refused'), null);
+    const outside = addCard('side-card', '<button class="y">Ship it</button>', { outside: true });
+    await cmd({ cmd: 'teach', cfg: {} });
+    outside.querySelector('button').click();
+    check('refuses to learn buttons outside the chat', msgsOf('learned').length === learnedCount, msgsOf('learned'));
+    await cmd({ cmd: 'stop' }); // so autopilot doesn't approve the card before the test clicks it
+    addTool('Write file', 'c.ts');
+    await cmd({ cmd: 'teach', cfg: {} });
+    await wait(100);
+    const builtin = [...document.querySelector('iframe').contentDocument.querySelector('iframe').contentDocument
+      .querySelector('chat-view').shadowRoot.querySelectorAll('chat-message')].at(-1)
+      .shadowRoot.querySelector('tool-use').shadowRoot.querySelector('.approve-btn');
+    builtin?.click();
+    check('refuses to re-learn built-in buttons', msgsOf('learned').length === learnedCount, msgsOf('learned'));
+    await wait(1000); // let the Run command card that Write file spawns settle
 
     // Extension reloaded: sendMessage now throws. The old copy must shut down quietly.
     await cmd({ cmd: 'start', cfg: { maxApprovals: 25 } });

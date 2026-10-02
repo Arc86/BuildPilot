@@ -1,0 +1,41 @@
+name: New checkpoint
+description: Suggest a Build Agent approval button that autopilot should recognise out of the box.
+title: "New checkpoint: "
+labels: ["checkpoint"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The **Report** button in the extension popup fills in the fields below.
+        **Don't paste plan text, requirements, instance names or screenshots of customer data**: this issue is public.
+  - type: input
+    id: component
+    attributes:
+      label: Component
+      description: The shadow host the button is rendered in.
+      placeholder: confirm-step
+    validations:
+      required: true
+  - type: input
+    id: selector
+    attributes:
+      label: Selector
+      placeholder: button.btn.primary
+    validations:
+      required: true
+  - type: input
+    id: button_text
+    attributes:
+      label: Button text
+      placeholder: Confirm changes
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: When does it appear?
+      description: For example, "after the plan is approved, before files are written". Keep it generic.
+  - type: input
+    id: version
+    attributes:
+      label: Extension version

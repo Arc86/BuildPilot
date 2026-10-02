@@ -4,7 +4,7 @@
 // Holds no state in memory: Chrome may stop this worker at any time.
 
 const HISTORY_MAX = 200;
-const DEFAULTS = { instances: [], allowedTools: [], maxApprovals: 25 };
+const DEFAULTS = { instances: [], allowedTools: [], customRules: [], ignored: [], maxApprovals: 25 };
 const BADGE = {
   watching: { text: 'ON', color: '#1f8a4c' },
   reconnecting: { text: '…', color: '#1f6feb' },
@@ -18,6 +18,7 @@ let queue = Promise.resolve();
 const serial = (fn) => (queue = queue.catch(() => {}).then(fn));
 
 const statusKey = (tabId) => `status:${tabId}`;
+const ruleKey = (r) => `${r.host}|${r.selector}|${r.text}`;
 const getStatus = async (tabId) => (await chrome.storage.local.get(statusKey(tabId)))[statusKey(tabId)];
 const setStatus = (tabId, status) => chrome.storage.local.set({ [statusKey(tabId)]: status });
 
@@ -39,21 +40,58 @@ function notify(tabId, title, message) {
   });
 }
 
-// Used by the popup's Start/Resume and by reconnects after a reload.
-// `carry` keeps the approval counters so a reload can't reset the approval limit.
-async function startTab(tabId, carry) {
+// Adds a checkpoint label to the trust list, plus the learned button rule if there is one.
+function trust(label, rule) {
+  return serial(async () => {
+    const { allowedTools, customRules } = await chrome.storage.local.get(DEFAULTS);
+    await chrome.storage.local.set({
+      allowedTools: [...new Set([...allowedTools, label])],
+      customRules: rule ? [...customRules.filter((r) => ruleKey(r) !== ruleKey(rule)), rule] : customRules,
+    });
+  });
+}
+
+function ignore(label) {
+  return serial(async () => {
+    const { ignored } = await chrome.storage.local.get(DEFAULTS);
+    await chrome.storage.local.set({ ignored: [...new Set([...ignored, label])] });
+  });
+}
+
+// Injects the content script on an enabled instance and returns its config.
+async function inject(tabId) {
   const tab = await chrome.tabs.get(tabId);
-  const { instances, allowedTools, maxApprovals } = await chrome.storage.local.get(DEFAULTS);
+  const { instances, allowedTools, customRules, ignored, maxApprovals } = await chrome.storage.local.get(DEFAULTS);
   let host = '';
   try { host = new URL(tab.url).host; } catch {}
   if (!instances.includes(host)) throw new Error(`${host || 'This page'} is not an enabled instance`);
   await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-  await chrome.tabs.sendMessage(tabId, { cmd: 'start', cfg: { allowedTools, maxApprovals }, carry });
+  return { allowedTools, rules: customRules, ignored, maxApprovals };
 }
 
+// Used by the popup's Start/Resume and by reconnects after a reload.
+// `carry` keeps the approval counters so a reload can't reset the approval limit.
+async function startTab(tabId, carry) {
+  const cfg = await inject(tabId);
+  await chrome.tabs.sendMessage(tabId, { cmd: 'start', cfg, carry });
+}
+
+async function teachTab(tabId) {
+  const cfg = await inject(tabId);
+  await chrome.tabs.sendMessage(tabId, { cmd: 'teach', cfg });
+}
+
+// Popup commands. trust/ignore answer a paused checkpoint, so they resume the run.
+const COMMANDS = {
+  startTab: (m) => startTab(m.tabId),
+  teachTab: (m) => teachTab(m.tabId),
+  trust: async (m) => { await trust(m.label, m.rule); await startTab(m.tabId); },
+  ignore: async (m) => { await ignore(m.label); await startTab(m.tabId); },
+};
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  if (msg.cmd === 'startTab') {
-    startTab(msg.tabId).then(() => reply({}), (err) => reply({ error: err.message }));
+  if (COMMANDS[msg.cmd]) {
+    COMMANDS[msg.cmd](msg).then(() => reply({}), (err) => reply({ error: err.message }));
     return true;
   }
   const tabId = sender.tab?.id;
@@ -61,6 +99,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === 'status') serial(() => setStatus(tabId, msg.status));
   else if (msg.type === 'log') appendHistory(msg.entry);
   else if (msg.type === 'notify') notify(tabId, msg.title, msg.message);
+  else if (msg.type === 'learned') trust(msg.rule.label, msg.rule);
 });
 
 chrome.storage.onChanged.addListener((changes) => {

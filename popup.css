@@ -28,13 +28,14 @@ dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0 0 
 dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
 ul { list-style: none; margin: 0; padding: 0; }
-li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+li { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+li span { flex: 1; overflow-wrap: anywhere; }
 .row { display: flex; gap: 6px; align-items: center; margin: 8px 0; }
 .small { font-size: 12px; }
 .muted { color: var(--muted); }
 .error { color: var(--error); }
 .card { background: var(--card); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
-button { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--fg); cursor: pointer; }
+button { font: inherit; white-space: nowrap; flex-shrink: 0; padding: 5px 10px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--fg); cursor: pointer; }
 button:disabled { opacity: .4; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 button.link, li button { border: none; padding: 0 2px; color: var(--accent); }

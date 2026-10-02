@@ -13,11 +13,18 @@ Chrome extension (Manifest V3) that approves recognised ServiceNow Build Agent c
 1. Open Build Agent on your instance and start a build.
 2. Click the extension → **Enable on this instance** (once per instance).
 3. Click **Start autopilot**.
-4. The first time each kind of checkpoint appears, autopilot pauses and notifies you. Click **Always approve this checkpoint** to trust it and resume.
+4. The first time each kind of checkpoint appears, autopilot pauses and notifies you. Click **Always approve** to trust it and resume.
+
+### When autopilot misses an approval
+
+- **It paused on a button it wasn't sure about.** Any chat button starting with Approve, Accept, Confirm, Proceed, Continue or Allow is treated as a possible checkpoint. Click **Always approve** to learn it, or **Not a checkpoint** to ignore it from now on.
+- **It didn't notice the button at all.** Click **Teach a button**, then click that button in Build Agent yourself. Your click approves it this time; autopilot approves it from then on. Teach mode lasts 60 seconds and only accepts buttons inside the chat.
+
+Buttons containing words like Reject, Delete, Cancel, Discard or Stop are never learned or clicked.
 
 Autopilot pauses and notifies when it sees:
 
-- a checkpoint you haven't trusted yet
+- a checkpoint you haven't trusted yet, including unfamiliar approval-like buttons
 - a sub-agent that fails after you clicked Start
 - an Approve click the page doesn't react to within 60s
 - the approval limit (default 25 per Start/Resume)
@@ -33,7 +40,15 @@ document > iframe > iframe > chat-view#shadow > chat-message#shadow > tool-use#s
 document > iframe > iframe > chat-view#shadow > chat-message#shadow > planning-display#shadow > button.plan-btn.approve
 ```
 
-Plans are always labelled `Plan`, so trusting one trusts all plans. Tool approvals are labelled with the first visible line of the `tool-use` card. Reject/Revise buttons are never touched. New checkpoint types go in `CHECKPOINTS` in `content.js`.
+Plans are always labelled `Plan`, so trusting one trusts all plans. Tool approvals are labelled with the first visible line of the `tool-use` card. Reject/Revise buttons are never touched.
+
+Buttons you learn are stored as rules (`component`, `selector`, `text`) in `chrome.storage.local` and only match inside `chat-view`.
+
+## Contributing checkpoints
+
+Learned a button that others will hit too? Click **Report** next to it in the popup. That opens a pre-filled [New checkpoint](../../issues/new?template=new-checkpoint.yml) issue with only the rule: no plan text, requirements or instance names. You review it before submitting.
+
+Rules reported by several people are added to `CHECKPOINTS` in `content.js` in the next release.
 
 ## Test
 
@@ -43,4 +58,8 @@ playwright-cli open && playwright-cli goto http://localhost:8765/test/fixture.ht
 playwright-cli eval "async () => { while (!window.__done) await new Promise(r => setTimeout(r, 500)); return window.__done }"
 ```
 
-`test/fixture.html` rebuilds the observed DOM shape and runs `content.js` against it with a stubbed `chrome` API.
+`test/fixture.html` rebuilds the observed DOM shape (`test/build-agent-dom.js`) and runs `content.js` against it with a stubbed `chrome` API.
+
+## License
+
+MIT
