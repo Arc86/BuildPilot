@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icons/logo.png" width="128" height="128" alt="Build Agent Autopilot icon">
+  <img src="docs/banner.jpg" width="100%" alt="Build Agent Autopilot: approve less, build more">
 </p>
 
 <h1 align="center">Build Agent Autopilot</h1>
