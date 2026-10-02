@@ -4,61 +4,84 @@
   <meta charset="utf-8">
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
-  <h1>Build Agent Autopilot</h1>
+<body data-state="stopped">
+  <header class="top">
+    <img src="icons/icon128.png" alt="" class="logo" width="28" height="28">
+    <div class="top-text">
+      <h1>Build Agent Autopilot</h1>
+      <p class="instance-line"><span class="instance-dot" aria-hidden="true"></span><span class="instance"></span></p>
+    </div>
+  </header>
 
-  <section id="unsupported" hidden>
-    <p class="muted">Open Build Agent on a ServiceNow instance (*.service-now.com), then click the extension again.</p>
+  <section id="unsupported" class="empty" hidden>
+    <p class="empty-title">Open Build Agent first</p>
+    <p class="empty-body">Autopilot runs on ServiceNow instances (*.service-now.com). Open Build Agent there, then click the extension again.</p>
   </section>
 
-  <section id="enable" hidden>
-    <p>Autopilot is not enabled on <strong class="instance"></strong>.</p>
-    <button id="enable-btn" class="primary">Enable on this instance</button>
+  <section id="enable" class="empty" hidden>
+    <p class="empty-title">Enable autopilot on <span class="instance"></span>?</p>
+    <p class="empty-body">It only runs on instances you enable, and only after you click Start.</p>
+    <button id="enable-btn" class="btn primary block">Enable on this instance</button>
   </section>
 
-  <section id="main" hidden>
-    <dl>
-      <dt>Instance</dt><dd class="instance"></dd>
-      <dt>Status</dt><dd id="status"></dd>
-      <dt>Approved</dt><dd id="total">0</dd>
-    </dl>
-
-    <div id="pending" class="card" hidden>
-      <p id="pending-label"></p>
-      <p id="pending-detail" class="muted small"></p>
-      <div class="row">
-        <button id="trust-btn" class="primary">Always approve</button>
-        <button id="ignore-btn" hidden>Not a checkpoint</button>
+  <main id="main" hidden>
+    <section class="status" aria-live="polite">
+      <div class="status-row">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="state-label" class="state-label">Not running</span>
+        <span class="count"><strong id="total">0</strong> approved</span>
       </div>
-    </div>
+      <p id="status-detail" class="status-detail"></p>
+      <div class="controls">
+        <button id="start-btn" class="btn primary">Start autopilot</button>
+        <button id="pause-btn" class="btn">Pause</button>
+        <button id="stop-btn" class="btn">Stop</button>
+      </div>
+    </section>
 
-    <div class="row">
-      <button id="start-btn" class="primary">Start autopilot</button>
-      <button id="pause-btn">Pause</button>
-      <button id="stop-btn">Stop</button>
-    </div>
-    <p id="error" class="error" hidden></p>
+    <section id="pending" class="pending" hidden>
+      <p class="pending-kicker">Needs you</p>
+      <p id="pending-label" class="pending-label"></p>
+      <p id="pending-detail" class="pending-detail"></p>
+      <div class="actions">
+        <button id="trust-btn" class="btn primary">Always approve</button>
+        <button id="ignore-btn" class="btn" hidden>Not a checkpoint</button>
+      </div>
+    </section>
 
-    <div class="row">
-      <button id="teach-btn">Teach a button</button>
-      <span id="teach-hint" class="muted small">Autopilot missed an approval? Click Teach, then click that button in Build Agent.</span>
-    </div>
+    <p id="error" class="alert" role="alert" hidden></p>
 
-    <h2>Approved checkpoints</h2>
-    <ul id="tools"></ul>
-    <p id="tools-empty" class="muted small">None yet. Autopilot pauses on each new checkpoint so you can approve it once.</p>
+    <p class="teach">Missed an approval? <button id="teach-btn" class="link" title="Click this, then click the missed button in Build Agent">Teach a button</button></p>
 
-    <div id="ignored-section" hidden>
-      <h2>Ignored buttons</h2>
-      <ul id="ignored"></ul>
-    </div>
+    <section class="group">
+      <div class="group-head">
+        <h2>Trusted</h2>
+        <span id="tools-count" class="badge"></span>
+        <button id="manage-btn" class="link">Import / export</button>
+      </div>
+      <ul id="tools" class="chips"></ul>
+      <p id="tools-empty" class="hint">None yet. Autopilot pauses on each new checkpoint so you can approve it once.</p>
+    </section>
 
-    <label class="row small">Pause after <input id="max" type="number" min="1" max="500"> approvals</label>
+    <section id="ignored-section" class="group" hidden>
+      <div class="group-head"><h2>Ignored</h2></div>
+      <ul id="ignored" class="chips"></ul>
+    </section>
 
-    <h2>Recent</h2>
-    <ul id="history" class="small"></ul>
-    <button id="copy-btn" class="link small">Copy log</button>
-  </section>
+    <section class="group">
+      <div class="group-head">
+        <h2>Recent</h2>
+        <button id="copy-btn" class="link">Copy log</button>
+      </div>
+      <ul id="history" class="timeline"></ul>
+      <p id="history-empty" class="hint">Nothing yet on this instance.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <label class="setting" id="setting">Pause after <input id="max" type="number" min="1" max="500"> approvals</label>
+    <a href="https://github.com/Arc86/BuildPilot" target="_blank" rel="noopener">v<span id="version"></span> · GitHub</a>
+  </footer>
 
   <script src="popup.js"></script>
 </body>

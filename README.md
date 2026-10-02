@@ -26,6 +26,15 @@
 
 Buttons containing words like Reject, Delete, Cancel, Discard or Stop are never learned or clicked.
 
+### Sharing learnings
+
+Click **Import / export** in the popup (next to **Trusted**) to open the learnings page.
+
+- **Export** saves your trusted checkpoints, learned buttons and ignored buttons as a JSON file. Instance names and the activity log are not included.
+- **Import** shows what a file adds before anything changes, then adds it to your learnings or replaces them. Anything doubtful is skipped with a reason: destructive button text, selectors that aren't a plain `tag.class` and malformed entries.
+
+Only import files from people you trust: autopilot approves what they contain without asking.
+
 Autopilot pauses and notifies when it sees:
 
 - a checkpoint you haven't trusted yet, including unfamiliar approval-like buttons
@@ -62,7 +71,7 @@ playwright-cli open && playwright-cli goto http://localhost:8765/test/fixture.ht
 playwright-cli eval "async () => { while (!window.__done) await new Promise(r => setTimeout(r, 500)); return window.__done }"
 ```
 
-`test/fixture.html` rebuilds the observed DOM shape (`test/build-agent-dom.js`) and runs `content.js` against it with a stubbed `chrome` API.
+`test/fixture.html` rebuilds the observed DOM shape (`test/build-agent-dom.js`) and runs `content.js` against it with a stubbed `chrome` API. `test/learnings.html` checks import/export validation the same way.
 
 ## License
 

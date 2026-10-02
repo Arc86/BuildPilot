@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Autopilot learnings</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body class="page">
+  <header class="top">
+    <img src="icons/icon128.png" alt="" class="logo" width="40" height="40">
+    <div class="top-text">
+      <h1>Autopilot learnings</h1>
+      <p class="sub">The checkpoints you trust, the buttons you taught, and the buttons you ignore.</p>
+    </div>
+  </header>
+
+  <dl class="totals">
+    <div><dt>Trusted</dt><dd id="count-trusted">0</dd></div>
+    <div><dt>Learned buttons</dt><dd id="count-rules">0</dd></div>
+    <div><dt>Ignored</dt><dd id="count-ignored">0</dd></div>
+  </dl>
+
+  <section class="block">
+    <h2>Export</h2>
+    <p class="body">Save your learnings as a file to back them up or share them with a colleague. Instance names and the activity log are not included.</p>
+    <button id="export-btn" class="btn primary">Export learnings</button>
+  </section>
+
+  <section class="block">
+    <h2>Import</h2>
+    <p class="body">Load a learnings file. You'll see what it adds before anything changes.</p>
+    <label id="drop" class="drop">
+      <input id="file" type="file" accept=".json,application/json">
+      <span class="drop-title">Choose a file</span>
+      <span class="drop-body">or drop it here</span>
+    </label>
+    <p id="error" class="alert" role="alert" hidden></p>
+
+    <div id="preview" class="preview" hidden>
+      <p id="preview-title" class="preview-title"></p>
+      <p class="warn-line">Autopilot will approve trusted checkpoints and learned buttons without asking. Only import files you trust.</p>
+
+      <div id="new-trusted-group" class="group" hidden>
+        <div class="group-head"><h3>Trusted checkpoints</h3></div>
+        <ul id="new-trusted" class="chips"></ul>
+      </div>
+      <div id="new-rules-group" class="group" hidden>
+        <div class="group-head"><h3>Learned buttons</h3></div>
+        <ul id="new-rules" class="rules"></ul>
+      </div>
+      <div id="new-ignored-group" class="group" hidden>
+        <div class="group-head"><h3>Ignored buttons</h3></div>
+        <ul id="new-ignored" class="chips"></ul>
+      </div>
+      <div id="skipped-group" class="group" hidden>
+        <div class="group-head"><h3>Skipped</h3></div>
+        <ul id="skipped" class="rules"></ul>
+      </div>
+
+      <fieldset class="mode">
+        <legend>How to import</legend>
+        <label><input type="radio" name="mode" value="add" checked> Add to my learnings</label>
+        <label><input type="radio" name="mode" value="replace"> Replace my learnings with this file</label>
+      </fieldset>
+
+      <div class="actions">
+        <button id="apply-btn" class="btn primary">Import</button>
+        <button id="cancel-btn" class="btn">Cancel</button>
+      </div>
+    </div>
+
+    <p id="done" class="done" role="status" hidden></p>
+  </section>
+
+  <footer class="foot">
+    <span>Build Agent Autopilot v<span id="version"></span></span>
+    <a href="https://github.com/Arc86/BuildPilot" target="_blank" rel="noopener">GitHub</a>
+  </footer>
+
+  <script src="learnings.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

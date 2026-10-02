@@ -102,7 +102,21 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   else if (msg.type === 'learned') trust(msg.rule.label, msg.rule);
 });
 
+// Running tabs keep their own copy of the settings; push changes from the popup or an import.
+const CONFIG_KEYS = ['allowedTools', 'customRules', 'ignored', 'maxApprovals'];
+
+async function pushConfig() {
+  const all = await chrome.storage.local.get(null);
+  const { allowedTools, customRules, ignored, maxApprovals } = { ...DEFAULTS, ...all };
+  const cfg = { allowedTools, rules: customRules, ignored, maxApprovals };
+  for (const [key, status] of Object.entries(all)) {
+    if (!key.startsWith('status:') || !status || status.state === 'stopped') continue;
+    chrome.tabs.sendMessage(Number(key.slice('status:'.length)), { cmd: 'config', cfg }).catch(() => {});
+  }
+}
+
 chrome.storage.onChanged.addListener((changes) => {
+  if (CONFIG_KEYS.some((k) => k in changes)) pushConfig();
   for (const [key, { newValue }] of Object.entries(changes)) {
     if (!key.startsWith('status:') || !newValue) continue;
     const tabId = Number(key.slice('status:'.length));
