@@ -14,7 +14,7 @@ const BADGE = {
   stopped: { text: '', color: '#000000' },
 };
 const ALERT = { text: '!', color: '#c0392b' };
-const RISK = { text: 'ON', color: '#c0392b' }; // watching in risk mode
+const RISK = { text: 'RISK', color: '#c0392b' }; // watching in risk mode
 
 // Serialise storage read-modify-writes. Never await serial() from inside a serial task.
 let queue = Promise.resolve();

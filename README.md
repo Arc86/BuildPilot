@@ -66,7 +66,7 @@ While risk mode is on, autopilot:
 
 It still never clicks buttons that say no (Reject, Cancel, Deny, Decline, Stop, Discard, Revert, Abort, Undo) and still only acts inside Build Agent's chat.
 
-Risk mode is per instance and turns off when you click **Turn off**, disable the instance or close Chrome. While it's on, the popup shows a red banner, the toolbar badge shows a red **ON**, and each approval appears as **risk approved** under **Recent**.
+Risk mode is per instance and turns off when you click **Turn off**, disable the instance or close Chrome. While it's on, the popup shows a red banner, the toolbar badge shows a red **RISK**, and each approval appears as **risk approved** under **Recent**.
 
 ## Risks
 
