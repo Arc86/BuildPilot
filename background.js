@@ -14,6 +14,7 @@ const BADGE = {
   stopped: { text: '', color: '#000000' },
 };
 const ALERT = { text: '!', color: '#c0392b' };
+const RISK = { text: 'ON', color: '#c0392b' }; // watching in risk mode
 
 // Serialise storage read-modify-writes. Never await serial() from inside a serial task.
 let queue = Promise.resolve();
@@ -27,6 +28,10 @@ const originOf = (host) => `https://${host}/*`;
 const statusKey = (tabId) => `status:${tabId}`;
 const getStatus = async (tabId) => (await chrome.storage.session.get(statusKey(tabId)))[statusKey(tabId)];
 const setStatus = (tabId, status) => chrome.storage.session.set({ [statusKey(tabId)]: status });
+
+// Risk mode is per instance and session-only too: closing Chrome turns it off everywhere.
+// Content scripts can't read or write session storage, so the page can never turn it on.
+const riskHosts = async () => (await chrome.storage.session.get({ riskMode: [] })).riskMode;
 
 function appendHistory(entry) {
   return serial(async () => {
@@ -67,7 +72,7 @@ async function inject(tabId) {
     throw new Error(`Autopilot no longer has access to ${host}. Enable it again from the popup.`);
   }
   await chrome.scripting.executeScript({ target: { tabId }, files: ['shared.js', 'content.js'] });
-  return { allowedTools, rules: customRules, ignored, maxApprovals };
+  return { allowedTools, rules: customRules, ignored, maxApprovals, riskMode: (await riskHosts()).includes(host) };
 }
 
 // Used by Start/Resume and by reconnects after a reload.
@@ -117,7 +122,26 @@ async function disableInstance(host) {
     if (key.startsWith('status:') && status?.host === host && status.state !== 'stopped') await stopTab(Number(key.slice(7)));
   }
   await update(({ instances }) => ({ instances: instances.filter((h) => h !== host) }));
+  await setRiskMode(host, false);
   await chrome.permissions.remove({ origins: [originOf(host)] }).catch(() => {});
+}
+
+// Turning risk mode on needs the instance's name typed in the popup, checked again here.
+function setRiskMode(host, on, confirm) {
+  return serial(async () => {
+    const hosts = await riskHosts();
+    if (!on) {
+      if (!hosts.includes(host)) return;
+      await chrome.storage.session.set({ riskMode: hosts.filter((h) => h !== host) });
+      appendHistory({ at: Date.now(), host, action: 'risk-mode', label: 'turned off' });
+      return;
+    }
+    const { instances } = await settings();
+    if (!instances.includes(host)) throw new Error(`${host || 'This page'} is not an enabled instance`);
+    if (confirm !== host.split('.')[0]) throw new Error('Type the instance name exactly to turn on risk mode.');
+    await chrome.storage.session.set({ riskMode: unique([...hosts, host]) });
+    appendHistory({ at: Date.now(), host, action: 'risk-mode', label: 'turned on' });
+  });
 }
 
 // Commands from the popup and Learnings page. trust/ignore/approveOnce answer a paused checkpoint.
@@ -156,6 +180,7 @@ const COMMANDS = {
     await addInstance(m.host);
   },
   disable: (m) => disableInstance(m.host),
+  setRiskMode: (m) => setRiskMode(m.host, m.on === true, m.confirm),
   importLearnings: (m) =>
     // Re-parsed here: the page's preview is not trusted as the source of truth.
     update((current) => Learnings.merge(current, Learnings.parse(m.text), m.mode === 'replace' ? 'replace' : 'add')),
@@ -204,9 +229,10 @@ const CONFIG_KEYS = ['allowedTools', 'customRules', 'ignored', 'maxApprovals'];
 
 async function pushConfig() {
   const { allowedTools, customRules, ignored, maxApprovals } = await settings();
-  const cfg = { allowedTools, rules: customRules, ignored, maxApprovals };
+  const risk = await riskHosts();
   for (const [key, status] of Object.entries(await chrome.storage.session.get(null))) {
     if (!key.startsWith('status:') || !status || status.state === 'stopped') continue;
+    const cfg = { allowedTools, rules: customRules, ignored, maxApprovals, riskMode: risk.includes(status.host) };
     chrome.tabs.sendMessage(Number(key.slice(7)), { cmd: 'config', cfg }).catch(() => {});
   }
 }
@@ -214,10 +240,12 @@ async function pushConfig() {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && CONFIG_KEYS.some((k) => k in changes)) pushConfig();
   if (area !== 'session') return;
+  if ('riskMode' in changes) pushConfig();
   for (const [key, { newValue }] of Object.entries(changes)) {
     if (!key.startsWith('status:') || !newValue) continue;
     const tabId = Number(key.slice(7));
-    const badge = newValue.state === 'paused' && newValue.reason !== 'user' ? ALERT : BADGE[newValue.state] || BADGE.stopped;
+    const alert = newValue.state === 'paused' && newValue.reason !== 'user';
+    const badge = alert ? ALERT : newValue.riskMode && newValue.state === 'watching' ? RISK : BADGE[newValue.state] || BADGE.stopped;
     chrome.action.setBadgeText({ tabId, text: badge.text }).catch(() => {});
     chrome.action.setBadgeBackgroundColor({ tabId, color: badge.color }).catch(() => {});
   }

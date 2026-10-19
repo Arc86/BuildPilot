@@ -111,6 +111,9 @@ body[data-state="paused"] .status { --tone: var(--warn); border-color: color-mix
 body[data-reason="error"] .status,
 body[data-reason="stuck"] .status { --tone: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 
+body[data-risk="on"][data-state="watching"] .status { --tone: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+body[data-risk="on"][data-state="watching"] .dot::after { border-color: var(--danger); }
+
 .status-row { display: flex; align-items: center; gap: 9px; }
 .dot { position: relative; width: 9px; height: 9px; border-radius: 50%; background: var(--tone); flex-shrink: 0; }
 body[data-state="watching"] .dot::after {
@@ -197,6 +200,35 @@ body[data-state="watching"] .dot::after {
 }
 .icon-btn:hover { color: var(--danger); background: var(--danger-soft); }
 
+.btn.danger { background: var(--danger); border-color: var(--danger); color: var(--bg); font-weight: 650; }
+.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 85%, var(--text)); border-color: var(--danger); }
+
+/* Risk mode */
+.risk-on, .risk-mode {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.risk-on { display: flex; align-items: center; gap: 10px; color: var(--danger); font-size: 12px; }
+.risk-on strong { font-weight: 650; }
+.risk-on .btn { margin-left: auto; height: 26px; }
+.risk-mode-title { color: var(--danger); font-weight: 650; margin-bottom: 4px; }
+.risk-mode-body { color: var(--text-2); font-size: 12px; margin-bottom: 10px; }
+.risk-mode-label { display: block; font-size: 12px; margin-bottom: 4px; }
+.risk-mode input {
+  width: 100%;
+  height: 28px;
+  margin-bottom: 8px;
+  padding: 0 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+
 .controls { display: flex; gap: 6px; margin-top: 10px; }
 .controls .btn { flex: 1; }
 
@@ -265,7 +297,10 @@ h2 { font-size: 12px; font-weight: 650; color: var(--text-2); }
 .tag[data-action="approved"], .tag[data-action="confirmed"], .tag[data-action="learned"] { color: var(--accent-text); }
 .tag[data-action="paused"] { color: var(--warn); }
 .tag[data-action="reconnected"] { color: var(--info); }
-.tag[data-action="teach-refused"] { color: var(--danger); }
+.tag[data-action="teach-refused"],
+.tag[data-action="risk-approved"],
+.tag[data-action="risk-mode"],
+.tag[data-action="error"] { color: var(--danger); }
 
 .hint { color: var(--muted); font-size: 12px; }
 

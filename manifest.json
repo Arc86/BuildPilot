@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Build Agent Autopilot",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Approves recognised ServiceNow Build Agent checkpoints so POC builds keep running.",
   "minimum_chrome_version": "116",
   "permissions": [

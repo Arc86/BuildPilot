@@ -35,7 +35,8 @@
 
   let state = 'stopped'; // watching | paused | stopped
   // allowedTools: trust keys ("tool:Run Script"); rules: learned buttons; ignored: candidate labels to skip
-  let cfg = { allowedTools: [], rules: [], ignored: [], maxApprovals: 25, idleMinutes: 5 };
+  // riskMode: approve every checkpoint without the checks below (set per instance by the background)
+  let cfg = { allowedTools: [], rules: [], ignored: [], maxApprovals: 25, idleMinutes: 5, riskMode: false };
   let timer = null;
   let total = 0; // approvals since Start
   let budget = 0; // approvals since Start/Resume, capped by cfg.maxApprovals
@@ -137,6 +138,7 @@
     if (!chat) return { approvals, failures, sig: '' };
 
     const rules = cfg.rules.map((r) => ({ ...r, kind: 'button' }));
+    const refused = cfg.riskMode ? S.REFUSAL_WORDS : S.UNSAFE_WORDS;
     for (const r of roots(chat.shadowRoot)) {
       const host = r.host?.localName;
       if (!host) continue;
@@ -164,7 +166,7 @@
       for (const b of r.querySelectorAll('button, [role="button"]')) {
         if (known.has(b)) continue;
         const text = buttonText(b);
-        if (text.length > 40 || !APPROVAL_WORDS.test(text) || S.UNSAFE_WORDS.test(text) || !isLive(b, text)) continue;
+        if (text.length > 40 || !APPROVAL_WORDS.test(text) || refused.test(text) || !isLive(b, text)) continue;
         const label = S.ruleLabel({ text, host });
         if (cfg.ignored.includes(label)) continue;
         approvals.push({ button: b, root: r, spec: { kind: 'button', host, selector: selectorFor(b), text, label, candidate: true } });
@@ -191,7 +193,7 @@
 
   function report() {
     const teaching = teachTimer !== null;
-    send({ type: 'status', status: { state, reason, message, total, budget, pending, teaching, host: location.host, at: Date.now() } });
+    send({ type: 'status', status: { state, reason, message, total, budget, pending, teaching, riskMode: !!cfg.riskMode, host: location.host, at: Date.now() } });
   }
 
   function log(action, label, detail = '') {
@@ -221,7 +223,7 @@
     return times.length >= BURST.count;
   }
 
-  function approve(item, label, detail, key) {
+  function approve(item, label, detail, key, action = 'approved') {
     clicked.add(item.button);
     item.button.click();
     total++;
@@ -229,7 +231,7 @@
     recentByKey.set(key, [...(recentByKey.get(key) || []), Date.now()]);
     inFlight = { button: item.button, text: item.spec.text, label, since: Date.now() };
     message = `Approved ${label}`;
-    log('approved', label, detail);
+    log(action, label, detail);
     report();
   }
 
@@ -246,7 +248,12 @@
 
     const fresh = s.failures.filter((f) => !seenFailures.has(f));
     fresh.forEach((f) => seenFailures.add(f));
-    if (fresh.length) return pause('error', `Sub-agent failed: ${firstLine(fresh[0].textContent)}`);
+    if (fresh.length) {
+      const text = `Sub-agent failed: ${firstLine(fresh[0].textContent)}`;
+      if (!cfg.riskMode) return pause('error', text);
+      log('error', text); // risk mode keeps going, but still tells you
+      notify('Sub-agent failed', NOTICE.error);
+    }
 
     if (inFlight) {
       if (!isLive(inFlight.button, inFlight.text)) {
@@ -269,6 +276,7 @@
       const risky = S.RISKY_CONTENT.exec(text)?.[0] || null;
 
       if (approvedOnce.has(next.button)) return approve(next, label, detail, key);
+      if (cfg.riskMode) return approve(next, label, detail, key, 'risk-approved'); // no trust, risk, loop or limit checks
       if (budget >= cfg.maxApprovals) return pause('limit', `Reached ${cfg.maxApprovals} approvals — check progress`);
 
       const rule = spec.candidate ? { host: spec.host, selector: spec.selector, text: spec.text, label } : null;
@@ -404,7 +412,11 @@
     else if (msg.cmd === 'pause' && state === 'watching') pause('user', 'Paused by you');
     else if (msg.cmd === 'stop') stop();
     else if (msg.cmd === 'approveOnce') ok = approveOnce();
-    else if (msg.cmd === 'config') cfg = { ...cfg, ...msg.cfg, maxApprovals: S.clampApprovals(msg.cfg?.maxApprovals ?? cfg.maxApprovals) };
+    else if (msg.cmd === 'config') {
+      const wasRisk = !!cfg.riskMode;
+      cfg = { ...cfg, ...msg.cfg, maxApprovals: S.clampApprovals(msg.cfg?.maxApprovals ?? cfg.maxApprovals) };
+      if (!!cfg.riskMode !== wasRisk) report(); // so the badge colour follows risk mode right away
+    }
     else if (msg.cmd === 'teach') {
       cfg = { ...cfg, ...msg.cfg };
       teach();

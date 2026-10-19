@@ -6,7 +6,7 @@
 </head>
 <body data-state="stopped">
   <header class="top">
-    <img src="icons/icon128.png" alt="" class="logo" width="28" height="28">
+    <img src="icons/icon128.png" alt="" id="logo" class="logo" width="28" height="28">
     <div class="top-text">
       <h1>Build Agent Autopilot</h1>
       <p class="instance-line"><span class="instance-dot" aria-hidden="true"></span><span class="instance"></span><button id="disable-btn" class="link quiet" hidden>Disable</button></p>
@@ -33,6 +33,20 @@
   </section>
 
   <main id="main" hidden>
+    <section id="risk-on" class="risk-on" hidden>
+      <p><strong>Risk mode is on.</strong> Every checkpoint is approved without checks.</p>
+      <button id="risk-off-btn" class="btn">Turn off</button>
+    </section>
+
+    <!-- Hidden: click the logo 5 times to show it. -->
+    <section id="risk-mode" class="risk-mode" hidden>
+      <p class="risk-mode-title">Risk mode</p>
+      <p class="risk-mode-body">Approves every checkpoint on <strong class="instance"></strong> without asking: new and untrusted ones, steps that delete data or change access, repeats, and past your approval limit. A failed sub-agent only notifies. It never clicks Reject, Cancel or Stop. Stays on until you turn it off or close Chrome.</p>
+      <label class="risk-mode-label" for="risk-confirm">Type <strong class="instance"></strong> to confirm</label>
+      <input id="risk-confirm" type="text" autocomplete="off" spellcheck="false">
+      <button id="risk-on-btn" class="btn danger block" disabled>Turn on risk mode</button>
+    </section>
+
     <section class="status" aria-live="polite">
       <div class="status-row">
         <span class="dot" aria-hidden="true"></span>

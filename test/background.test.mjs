@@ -222,6 +222,37 @@ const check = (name, ok, got) => checks.push({ name, ok: !!ok, got });
   check('shows notifications from the content script', chrome._.notes.length === 1, chrome._.notes);
 }
 
+// Risk mode: per instance, session-only, needs the typed instance name
+{
+  const { chrome, send, local, session } = await load({ instances: [HOST] });
+  chrome._.tabs.set(8, { id: 8, url: `https://${HOST}/now/build` });
+  chrome._.granted.add(ORIGIN);
+  const fromPage = await send({ cmd: 'setRiskMode', host: HOST, on: true, confirm: 'demo' }, PAGE(8));
+  await settle();
+  check('content scripts cannot turn on risk mode', fromPage === 'no-reply' && !session.riskMode, session.riskMode);
+  const wrong = await send({ cmd: 'setRiskMode', host: HOST, on: true, confirm: 'dem' }, POPUP);
+  check('refuses risk mode without the exact instance name', /Type the instance name/.test(wrong?.error) && !session.riskMode, wrong);
+  const notEnabled = await send({ cmd: 'setRiskMode', host: 'other.service-now.com', on: true, confirm: 'other' }, POPUP);
+  check('refuses risk mode on instances that are not enabled', /not an enabled instance/.test(notEnabled?.error), notEnabled);
+  const ok = await send({ cmd: 'setRiskMode', host: HOST, on: true, confirm: 'demo' }, POPUP);
+  await settle();
+  check('turns on risk mode in session storage only', !ok?.error && session.riskMode?.includes(HOST) && !('riskMode' in local), { ok, session: session.riskMode });
+  check('logs that risk mode was turned on', local.history.some((e) => e.action === 'risk-mode' && e.label === 'turned on'), local.history);
+
+  await send({ cmd: 'startTab', tabId: 8 }, POPUP);
+  check('starts the tab in risk mode', chrome._.sent.some((s) => s.msg.cmd === 'start' && s.msg.cfg.riskMode === true), chrome._.sent);
+  await send({ type: 'status', status: { state: 'watching', host: HOST, riskMode: true } }, PAGE(8));
+  await settle();
+  chrome._.sent.length = 0;
+  await send({ cmd: 'setRiskMode', host: HOST, on: false }, POPUP);
+  await settle();
+  check('turning it off updates running tabs', !session.riskMode.includes(HOST) && chrome._.sent.some((s) => s.tabId === 8 && s.msg.cmd === 'config' && s.msg.cfg.riskMode === false), chrome._.sent);
+
+  await send({ cmd: 'setRiskMode', host: HOST, on: true, confirm: 'demo' }, POPUP);
+  await send({ cmd: 'disable', host: HOST }, POPUP);
+  check('disabling the instance turns risk mode off', !session.riskMode.includes(HOST), session.riskMode);
+}
+
 const failed = checks.filter((c) => !c.ok);
 for (const c of checks) console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.ok ? '' : ' -> ' + JSON.stringify(c.got)}`);
 console.log(`${checks.length - failed.length}/${checks.length} passed`);

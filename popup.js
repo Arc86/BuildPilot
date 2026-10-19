@@ -6,12 +6,15 @@ const STATE_LABEL = { watching: 'Watching', paused: 'Paused', reconnecting: 'Rec
 
 let tab;
 let host = '';
+let riskRevealed = false; // the risk mode panel stays hidden until the logo is clicked 5 times
+let logoClicks = [];
 
 const statusKey = () => `status:${tab.id}`;
 const origin = () => `https://${host}/*`;
 const time = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const settings = () => chrome.storage.local.get(DEFAULTS);
 const getStatus = async () => (await chrome.storage.session.get(statusKey()))[statusKey()];
+const riskOn = async () => (await chrome.storage.session.get({ riskMode: [] })).riskMode.includes(host);
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -33,9 +36,10 @@ async function command(cmd, extra = {}) {
   return res;
 }
 
-function statusDetail({ state, message, teaching, pending }) {
+function statusDetail({ state, message, teaching, pending }, risk) {
   if (teaching) return 'Click the button in Build Agent you want autopilot to learn.';
   if (pending) return 'Waiting for your decision below.';
+  if (state === 'watching' && risk) return 'Risk mode: approving every checkpoint as it appears.';
   if (state === 'watching') return message && !message.startsWith('Watching') ? message : 'Approving trusted checkpoints as they appear.';
   if (state === 'stopped') return message && message !== 'Stopped' ? message : 'Click Start once your build is running.';
   return message;
@@ -94,10 +98,16 @@ async function render() {
   }
   if (!enabled) return;
 
+  const risk = await riskOn();
+  document.body.dataset.risk = risk ? 'on' : '';
+  $('risk-on').hidden = !risk;
+  $('risk-mode').hidden = risk || !riskRevealed;
+  $('risk-on-btn').disabled = $('risk-confirm').value.trim() !== host.split('.')[0];
+
   document.body.dataset.state = status.teaching ? 'teaching' : status.state;
   document.body.dataset.reason = status.state === 'paused' ? status.reason || '' : '';
   $('state-label').textContent = STATE_LABEL[document.body.dataset.state] || 'Not running';
-  $('status-detail').textContent = statusDetail(status);
+  $('status-detail').textContent = statusDetail(status, risk);
   $('total').textContent = status.total ?? 0;
 
   const p = status.pending;
@@ -207,6 +217,23 @@ async function init() {
     $('copy-btn').textContent = 'Copied';
   };
   $('clear-btn').onclick = () => command('clearLog');
+
+  $('logo').onclick = () => {
+    const now = Date.now();
+    logoClicks = [...logoClicks.filter((t) => now - t < 3000), now];
+    if (logoClicks.length < 5) return;
+    riskRevealed = true;
+    render().then(() => $('risk-mode').hidden || $('risk-confirm').focus());
+  };
+  $('risk-confirm').oninput = render;
+  $('risk-on-btn').onclick = async () => {
+    const res = await command('setRiskMode', { host, on: true, confirm: $('risk-confirm').value.trim() });
+    if (res?.error) return;
+    $('risk-confirm').value = '';
+    riskRevealed = false;
+    render();
+  };
+  $('risk-off-btn').onclick = () => command('setRiskMode', { host, on: false });
 
   chrome.storage.onChanged.addListener(render);
   render();

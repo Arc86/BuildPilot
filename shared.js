@@ -3,6 +3,8 @@
 globalThis.BuildPilotShared = (() => {
   // Button text that is never learned, imported or clicked. Matches word stems ("deleting", "removal").
   const UNSAFE_WORDS = /\b(reject|delet|remov|cancel|discard|revert|den(y|ie)|declin|stop|uninstall|drop|purg|wip(e|ing)|truncat|destroy|reset|overwrit|eras(e|ing)|clear)\w*/i;
+  // Risk mode clicks destructive approvals ("Approve deletion") but never a button that says no.
+  const REFUSAL_WORDS = /\b(reject|cancel|discard|revert|den(y|ie)|declin|stop|abort|undo)\w*/i;
 
   // Card text that pauses autopilot even on a trusted checkpoint: the step may delete data or change access.
   const RISKY_CONTENT =
@@ -53,5 +55,5 @@ globalThis.BuildPilotShared = (() => {
     return null;
   }
 
-  return { UNSAFE_WORDS, RISKY_CONTENT, KINDS, clampApprovals, ruleKey, ruleLabel, trustKey, parseTrustKey, migrateTrust, checkRule };
+  return { UNSAFE_WORDS, REFUSAL_WORDS, RISKY_CONTENT, KINDS, clampApprovals, ruleKey, ruleLabel, trustKey, parseTrustKey, migrateTrust, checkRule };
 })();

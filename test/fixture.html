@@ -173,6 +173,24 @@
     check('refuses to re-learn built-in buttons', msgsOf('learned').length === learnedCount, msgsOf('learned'));
     await wait(1000);
 
+    // Risk mode: approves everything without asking, but never a button that says no.
+    await cmd({ cmd: 'start', cfg: { allowedTools: [], rules: [], maxApprovals: 1, riskMode: true } });
+    check('reports risk mode', last().riskMode === true, last());
+    const riskWrites = count('Write file');
+    addTool('Never seen tool', 'x');
+    addTool('Write file', 'gr.deleteMultiple();');
+    addCard('risk-card', '<button class="no">Cancel</button><button class="yes">Approve deletion</button>');
+    addCard('stop-card', '<button class="s">Confirm stop</button>');
+    addFailure('risk-failure');
+    await until(() => count('Never seen tool') === 1 && count('Write file') > riskWrites && count('risk-card:Approve deletion') === 1, 15000);
+    check('risk mode approves untrusted, risky and past the limit', count('Never seen tool') === 1 && count('Write file') > riskWrites && count('risk-card:Approve deletion') === 1 && last().state === 'watching', { clicks: __clicks, status: last() });
+    check('risk mode logs its approvals separately', __msgs.some((m) => m.entry?.action === 'risk-approved'), null);
+    check('risk mode keeps going after a sub-agent failure', !statuses().some((s) => s.reason === 'error' && /risk-failure/.test(s.message)), last());
+    check('risk mode never clicks refusals', !__clicks.includes('risk-card:Cancel') && !__clicks.includes('stop-card:Confirm stop'), __clicks);
+    await cmd({ cmd: 'stop' });
+    await cmd({ cmd: 'config', cfg: { riskMode: false } });
+    await wait(1000);
+
     // Extension reloaded: sendMessage throws. The old copy shuts down quietly...
     await cmd({ cmd: 'start', cfg: {} });
     let crashed = null;
