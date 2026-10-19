@@ -53,6 +53,21 @@ Click **Import / export** in the popup (next to **Trusted**) to open the Learnin
 
 Only import files from people you trust: autopilot approves what they contain without asking.
 
+### Risk mode
+
+Risk mode approves every checkpoint without asking. It is hidden: click the logo in the popup 5 times within 3 seconds to show it, then type the instance name to turn it on.
+
+While risk mode is on, autopilot:
+
+- approves checkpoints you haven't trusted, including unfamiliar approval-like buttons
+- approves steps that mention deleting data or changing access, including buttons such as "Approve deletion"
+- doesn't pause for loops or at the approval limit
+- notifies you when a sub-agent fails, but keeps going
+
+It still never clicks buttons that say no (Reject, Cancel, Deny, Decline, Stop, Discard, Revert, Abort, Undo) and still only acts inside Build Agent's chat.
+
+Risk mode is per instance and turns off when you click **Turn off**, disable the instance or close Chrome. While it's on, the popup shows a red banner, the toolbar badge shows a red **ON**, and each approval appears as **risk approved** under **Recent**.
+
 ## Risks
 
 Autopilot exists to approve things without you looking. That is also the risk.
@@ -60,6 +75,7 @@ Autopilot exists to approve things without you looking. That is also the risk.
 - **Trusting a checkpoint trusts everything it will ever do.** Trusting "Run Script" approves every future script, whatever it contains. Trusting plans approves every plan.
 - **The agent can be wrong or misled.** Content in the instance (requirements, records, attachments) can steer the agent into proposing changes you wouldn't approve.
 - **The risky-step check is a safety net, not a guarantee.** Autopilot pauses when a card's visible text mentions deleting, truncating, purging or wiping data, or changing roles and ACLs. It can only see what the card shows on screen, and can't catch every phrasing.
+- **[Risk mode](#risk-mode) removes the safety nets.** It approves whatever the agent proposes, including deletions and access changes, with no limit. Turn it on only for a build you could lose.
 
 So:
 
